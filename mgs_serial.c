@@ -79,20 +79,20 @@ int main() {
     printf("Execution Time: %.1f ms\n", 1000.0 * (end - start) / CLOCKS_PER_SEC);
 
     //Check error = A - QR (should be near 0)
-    double* B = calloc(n * m, sizeof(double));
-    double sum = 0;
-    for (size_t i = 0; i < n; i++) {
-        for (size_t j = 0; j < m; j++) {
-            B[i*n + j] = 0;
-            for (size_t k = 0; k < n; k++) {
-                B[i*n + j] += Q[i*n + k] * R[k*n + j];
-            }
+    // double* B = calloc(n * m, sizeof(double));
+    // double sum = 0;
+    // for (size_t i = 0; i < n; i++) {
+    //     for (size_t j = 0; j < m; j++) {
+    //         B[i*n + j] = 0;
+    //         for (size_t k = 0; k < n; k++) {
+    //             B[i*n + j] += Q[i*n + k] * R[k*n + j];
+    //         }
 
-            sum += fabs(B[i*n+j] - A[i*n+j]);
-        }
-    }
-    free(B);
-    printf("Roundoff Error: %f\n\n", sum);
+    //         sum += fabs(B[i*n+j] - A[i*n+j]);
+    //     }
+    // }
+    // free(B);
+    // printf("Roundoff Error: %f\n\n", sum);
 
     if (n <= 10) {
         printf("Matrix A:\n");

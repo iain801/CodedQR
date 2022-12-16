@@ -102,9 +102,9 @@ void printMatrix(double* matrix, size_t n, size_t m) {
 
 
 int main() {
-    const size_t n = 1000;
-    const size_t m = 1000;
-    const size_t b = 125;
+    const size_t n = 3;
+    const size_t m = 3;
+    const size_t b = 1;
 
     double* A = calloc(n * m, sizeof(double));
     double* Q = calloc(n * m, sizeof(double));
@@ -125,20 +125,20 @@ int main() {
     printf("Execution Time: %.1f ms\n", 1000.0 * (end - start) / CLOCKS_PER_SEC);
 
     // Check error = A - QR (should be near 0)
-    double* B = calloc(n * m, sizeof(double));
-    double sum = 0;
-    for (size_t i = 0; i < m; i++) {
-        for (size_t j = 0; j < n; j++) {
-            B[i*n + j] = 0;
-            for (size_t k = 0; k < n; k++) {
-                B[i*n + j] += Q[i*n + k] * R[k*n + j];
-            }
+    // double* B = calloc(n * m, sizeof(double));
+    // double sum = 0;
+    // for (size_t i = 0; i < m; i++) {
+    //     for (size_t j = 0; j < n; j++) {
+    //         B[i*n + j] = 0;
+    //         for (size_t k = 0; k < n; k++) {
+    //             B[i*n + j] += Q[i*n + k] * R[k*n + j];
+    //         }
 
-            sum += fabs(B[i*n+j] - A[i*n+j]);
-        }
-    }
-    free(B);
-    printf("Roundoff Error: %f\n\n", sum);
+    //         sum += fabs(B[i*n+j] - A[i*n+j]);
+    //     }
+    // }
+    // free(B);
+    // printf("Roundoff Error: %f\n\n", sum);
 
     if (n <= 10) {
         printf("Matrix A:\n");
