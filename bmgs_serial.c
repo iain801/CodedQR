@@ -107,11 +107,10 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
                 }
             }
         }
-        /* NOTE: results of block [i, i+n) affect:
-         *  - R: all rows in block in all columns after current block
-         *  - Q: all rows in all columns after current block
+        /* NOTE: results of block [i, i+b) affect:
+         *  - R: rows [i, i+b) in columns [i+b, n)
+         *  - Q: columns [i+b, n) in all rows
          */
-
     }
 
     free(Qbar);
@@ -119,10 +118,27 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
 }
 
 
-int main() {
-    const size_t n = 4;
-    const size_t m = 4;
-    const size_t b = 3;
+int main(int argc, char** argv) {
+    size_t n, m, b;
+
+    if (argc == 4) {
+        n = atoi(argv[1]);
+        m = atoi(argv[2]);
+        b = atoi(argv[3]);
+    }
+    else {
+        printf ("Invalid Input, must have arguements: n m b \n");
+        exit(1);
+    }
+    if (n > m) {
+        printf ("Invalid Input, n cannot be greater than m\n");
+        exit(1);
+    }
+    if (b > m) {
+        printf ("Invalid Input, b cannot be greater than m\n");
+        exit(1);
+    }
+    
 
     double* A = calloc(n * m, sizeof(double));
     double* Q = calloc(n * m, sizeof(double));
@@ -156,9 +172,10 @@ int main() {
         }
     }
     free(B);
-    printf("Roundoff Error: %f\n\n", sum);
+    printf("Roundoff Error: %f\n", sum);
 
     if (n <= 10) {
+        printf("\n");
         printf("Matrix A:\n");
         printMatrix(A, n, m);
 
