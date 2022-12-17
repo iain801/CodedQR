@@ -1,11 +1,22 @@
 #include <stdlib.h>
 #include <math.h>
+#include <time.h>
+#include <stdio.h>
+
+void printMatrix(double* matrix, size_t n, size_t m) {
+    for (size_t i = 0; i < m; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            printf("%.3f ", matrix[i*n + j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
 
 
 void ICGS(double* Q, double* R, size_t n, size_t m) {
     size_t i, j, k;
     for (i = 0; i < n; ++i) {
-        
         // R[i,i] = ||Q[:,i]||
         for (j = 0; j < m; ++j) {
             R[i*n + i] += Q[j*n + i] * Q[j*n + i];
@@ -49,8 +60,10 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
 
     //Iterate down columns
     for (i = 0; i < n; i += b) {
-
+        printMatrix(R, n, m);
         //Tall skinny QR decomposition for block
+
+        /* Copy Q & R into Qbar & Rbar */
         for (k = 0; k < b; ++k) {
             for (j = 0; j < m; ++j) {
                 Qbar[j*b + k] = Q[j*n + (i+k)];
@@ -60,8 +73,10 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
             }        
         }
 
+        /* Perform standard MGS on Qbar - Rbar sub-matrix */
         ICGS(Qbar, Rbar, b, m);
 
+        /* Copy Qbar & Rbar back into Q & R */
         for (k = 0; k < b; ++k) {
             for (j = 0; j < m; ++j) {
                 Q[j*n + (i+k)] = Qbar[j*b + k];  
@@ -73,38 +88,37 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
 
         /*************************************************/
         
+        /* j = from next block to end of matrix */
         for (j = i + b; j < n; ++j) {
+
+            /*  For row i (top row in block), column j, R = 
+                Q[col j] dot Q[col i] */
             for (k = 0; k < m; ++k) {
-                R[i*n + j] += Q[k*n + j] * Q[k*n + i]; //Column-Wise all reduce
+                R[i*n + j] += Q[k*n + j] * Q[k*n + i];
             }
+
+            /*  Q[col j] reduced by Q[col i] * R[i,j] 
+                i.e. Q[col j] minus itself dot Q[col i]*/
             for (k = 0; k < m; ++k) {
                 Q[k*n + j] -= Q[k*n + i] * R[i*n + j];
             }
         }
+        /* NOTE: results of block [i, i+n) affect:
+            - R: row i in all columns after current block
+            - Q: all rows in all columns after current block
+            */
+
     }
 
     free(Qbar);
     free(Rbar);
 }
 
-#include <time.h>
-#include <stdio.h>
-
-void printMatrix(double* matrix, size_t n, size_t m) {
-    for (size_t i = 0; i < m; ++i) {
-        for (size_t j = 0; j < n; ++j) {
-            printf("%.3f ", matrix[i*n + j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
-}
-
 
 int main() {
-    const size_t n = 3;
-    const size_t m = 3;
-    const size_t b = 1;
+    const size_t n = 4;
+    const size_t m = 4;
+    const size_t b = 2;
 
     double* A = calloc(n * m, sizeof(double));
     double* Q = calloc(n * m, sizeof(double));
@@ -125,20 +139,20 @@ int main() {
     printf("Execution Time: %.1f ms\n", 1000.0 * (end - start) / CLOCKS_PER_SEC);
 
     // Check error = A - QR (should be near 0)
-    // double* B = calloc(n * m, sizeof(double));
-    // double sum = 0;
-    // for (size_t i = 0; i < m; i++) {
-    //     for (size_t j = 0; j < n; j++) {
-    //         B[i*n + j] = 0;
-    //         for (size_t k = 0; k < n; k++) {
-    //             B[i*n + j] += Q[i*n + k] * R[k*n + j];
-    //         }
+    double* B = calloc(n * m, sizeof(double));
+    double sum = 0;
+    for (size_t i = 0; i < m; i++) {
+        for (size_t j = 0; j < n; j++) {
+            B[i*n + j] = 0;
+            for (size_t k = 0; k < n; k++) {
+                B[i*n + j] += Q[i*n + k] * R[k*n + j];
+            }
 
-    //         sum += fabs(B[i*n+j] - A[i*n+j]);
-    //     }
-    // }
-    // free(B);
-    // printf("Roundoff Error: %f\n\n", sum);
+            sum += fabs(B[i*n+j] - A[i*n+j]);
+        }
+    }
+    free(B);
+    printf("Roundoff Error: %f\n\n", sum);
 
     if (n <= 10) {
         printf("Matrix A:\n");
