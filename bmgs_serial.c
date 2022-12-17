@@ -49,22 +49,22 @@ void ICGS(double* Q, double* R, size_t n, size_t m) {
 void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
 {
 
-    size_t i, j, k;
+    size_t i, j, k, l;
     double* Qbar = calloc(b * m, sizeof(double));
     double* Rbar = calloc(b * m, sizeof(double));
 
-    // Copy A into Q
+    /* Copy A into Q and clear R*/
     for (i = 0; i < n * m; ++i) {
         Q[i] = A[i];
+        R[i % (n*n)] = 0;
     }
 
-    //Iterate down columns
+    /* Iterate down columns */
     for (i = 0; i < n; i += b) {
-        printMatrix(R, n, m);
         //Tall skinny QR decomposition for block
-
+ 
         /* Copy Q & R into Qbar & Rbar */
-        for (k = 0; k < b; ++k) {
+        for (k = 0; k < b && i+k < n; ++k) {
             for (j = 0; j < m; ++j) {
                 Qbar[j*b + k] = Q[j*n + (i+k)];
             }
@@ -77,7 +77,7 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
         ICGS(Qbar, Rbar, b, m);
 
         /* Copy Qbar & Rbar back into Q & R */
-        for (k = 0; k < b; ++k) {
+        for (k = 0; k < b && i+k < n; ++k) {
             for (j = 0; j < m; ++j) {
                 Q[j*n + (i+k)] = Qbar[j*b + k];  
             }  
@@ -87,26 +87,30 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
         }
 
         /*************************************************/
-        
+
         /* j = from next block to end of matrix */
         for (j = i + b; j < n; ++j) {
 
-            /*  For row i (top row in block), column j, R = 
-                Q[col j] dot Q[col i] */
-            for (k = 0; k < m; ++k) {
-                R[i*n + j] += Q[k*n + j] * Q[k*n + i];
-            }
+            /* l = each row in the current block*/
+            for (l = i; l < i + b; ++l) {
 
-            /*  Q[col j] reduced by Q[col i] * R[i,j] 
-                i.e. Q[col j] minus itself dot Q[col i]*/
-            for (k = 0; k < m; ++k) {
-                Q[k*n + j] -= Q[k*n + i] * R[i*n + j];
+                /*  For all rows in block, column j, 
+                    R[row l, col j] = Q[col j] dot Q[col l] */
+                for (k = 0; k < m; ++k) {
+                    R[l*n + j] += Q[k*n + j] * Q[k*n + l];
+                }
+
+                /*  Q[col j] reduced by Q[col i] * R[i,j] 
+                    i.e. Q[col j] minus itself dot Q[col i]*/
+                for (k = 0; k < m; ++k) {
+                    Q[k*n + j] -= Q[k*n + l] * R[l*n + j];
+                }
             }
         }
         /* NOTE: results of block [i, i+n) affect:
-            - R: row i in all columns after current block
-            - Q: all rows in all columns after current block
-            */
+         *  - R: all rows in block in all columns after current block
+         *  - Q: all rows in all columns after current block
+         */
 
     }
 
@@ -118,7 +122,7 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
 int main() {
     const size_t n = 4;
     const size_t m = 4;
-    const size_t b = 2;
+    const size_t b = 3;
 
     double* A = calloc(n * m, sizeof(double));
     double* Q = calloc(n * m, sizeof(double));
