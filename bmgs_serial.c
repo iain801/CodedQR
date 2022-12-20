@@ -51,7 +51,7 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
 
     size_t i, j, k, l;
     double* Qbar = calloc(b * m, sizeof(double));
-    double* Rbar = calloc(b * m, sizeof(double));
+    double* Rbar = calloc(b * b, sizeof(double));
 
     /* Copy A into Q and clear R*/
     for (i = 0; i < n * m; ++i) {
