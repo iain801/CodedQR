@@ -13,35 +13,13 @@ void printMatrix(double* matrix, size_t n, size_t m) {
     printf("\n");
 }
 
-
-void ICGS(double* Q, double* R, size_t n, size_t m) {
-    size_t i, j, k;
-    for (i = 0; i < n; ++i) {
-        // R[i,i] = ||Q[:,i]||
-        for (j = 0; j < m; ++j) {
-            R[i*n + i] += Q[j*n + i] * Q[j*n + i];
-        }
-        R[i*n + i] = sqrt(R[i*n + i]);
-
-        //Set zero values to near-zero
-        if (R[i*n + i] == 0) R[i*n + i] = 2.3e-308;
-        // Normalize Q[:,i]
-        for (j = 0; j < m; ++j)
-            Q[j*n + i] /= R[i*n + i];
-
-        // For upper triangular R[i, i+1:n]
-        for (k = i+1; k < n; ++k) {
-            //R[i,k] = Q[:,k] * Q[:,i]
-            for (j = 0; j < m; ++j) {
-                R[i*n + k] += Q[j*n + k] * Q[j*n + i];
-            }
-            //Q[:,k] = Q[:,k] - R[i,k] * Q[:,i]
-            for (j = 0; j < m; ++j) {
-                Q[j*n + k] -= R[i*n + k] * Q[j*n + i];
-            }
-        }
+void randMatrix(double* A, int n, int m) {
+    for (int i = 0; i < n * m; ++i) {
+        A[i] = (rand() % 10 - 5) / 1.0;
     }
 }
+
+#define DEBUG 0
 
 // Input:  A[m,n], Q[m,n], R[n,n], n <= m
 // Output: Q and R such that A = QR and Q is orthonormal.
@@ -73,8 +51,43 @@ void BMGS(double* A, double* Q, double* R, size_t n, size_t m, size_t b)
             }        
         }
 
+        if(DEBUG) {
+            printf("Q_initial (%d,%d)\n", i/b, 0);
+            printMatrix(Qbar, b, m);
+        }
+
         /* Perform standard MGS on Qbar - Rbar sub-matrix */
-        ICGS(Qbar, Rbar, b, m);
+        size_t x, y, z;
+        for (x = 0; x < b; ++x) {
+            // R[i,i] = ||Q[:,i]||
+            for (y = 0; y < m; ++y) {
+                Rbar[x*b + x] += Qbar[y*b + x] * Qbar[y*b + x];
+            }
+            Rbar[x*b + x] = sqrt(Rbar[x*b + x]);
+
+            //Set zero values to near-zero
+            if (Rbar[x*b + x] == 0) Rbar[x*b + x] = 2.3e-308;
+            // Normalize Q[:,i]
+            for (y = 0; y < m; ++y)
+                Qbar[y*b + x] /= Rbar[x*b + x];
+
+            // For upper triangular R[i, i+1:n]
+            for (z = x+1; z < b; ++z) {
+                //R[i,k] = Q[:,k] * Q[:,i]
+                for (y = 0; y < m; ++y) {
+                    Rbar[x*b + z] += Qbar[y*b + z] * Qbar[y*b + x];
+                }
+                //Q[:,k] = Q[:,k] - R[i,k] * Q[:,i]
+                for (y = 0; y < m; ++y) {
+                    Qbar[y*b + z] -= Rbar[x*b + z] * Qbar[y*b + x];
+                }
+            }
+        }
+
+        if(DEBUG) {
+            printf("Q_reduced (%d,%d)\n", i/b, 0);
+            printMatrix(Qbar, b, m);
+        }
 
         /* Copy Qbar & Rbar back into Q & R */
         for (k = 0; k < b && i+k < n; ++k) {
@@ -145,9 +158,7 @@ int main(int argc, char** argv) {
     double* R = calloc(n * n, sizeof(double));
     
     srand(0);
-    for (size_t i = 0; i < n * m; ++i) {
-        A[i] = (rand() % 10000 - 5000) / 100.0;
-    }
+    randMatrix(A, n, m);
 
     clock_t start, end;
     printf("Starting...\n");
