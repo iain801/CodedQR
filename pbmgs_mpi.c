@@ -181,8 +181,7 @@ int main(int argc, char** argv) {
                 for (k = 0; k < loc_rows; ++k)
                     Q[k*loc_cols + j] /= Qnorm;
 
-                /* Copy Qnorm into R for 
-                    diagonal block (prow == pcol) */
+                /* Set R to Qnorm in the correct row in the correct node */                    
                 if (p_row == (APC * loc_cols + j) / loc_rows) {
                     r_off = (APC * loc_cols + j) % loc_rows;
                     if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, r_off+j, l);
@@ -213,8 +212,7 @@ int main(int argc, char** argv) {
                         Q[k*loc_cols + l] -= Qdot * Q[k*loc_cols + j];
                     }
 
-                    /* Copy Qdot into R for 
-                        diagonal block (p_row == (p_col * loc_cols) / loc_rows) */
+                    /* Set R to Qdot in the correct row in the correct node */                    
                     if (p_row == (APC * loc_cols + j) / loc_rows) {
                         r_off = (APC * loc_cols + j) % loc_rows;
                         if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qdot, r_off+j, l);
@@ -281,10 +279,7 @@ int main(int argc, char** argv) {
                         Q[l*loc_cols + j] -= Rbar[k*loc_cols + j] * Qbar[l*loc_cols + k];
                     }
 
-                    /* Set R if in the upper diagonal */
-                    /* row in glob: APC * loc_cols + k
-                       rows of block: [p_row * loc_rows, (p_row+1) * loc_rows) */
-                    
+                    /* Set R in the correct row in the correct node */                    
                     if (p_row == (APC * loc_cols + k) / loc_rows)
                     {
                         r_off = (APC * loc_cols + k) % loc_rows;
