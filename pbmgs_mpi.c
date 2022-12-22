@@ -47,6 +47,8 @@ int main(int argc, char** argv) {
     MPI_Status status;
     MPI_Comm row_comm, col_comm;
 
+    double t1, t2;              /* timer */
+
     /*********************** Initialize MPI *****************************/
 
     MPI_Init (&argc, &argv);
@@ -62,10 +64,9 @@ int main(int argc, char** argv) {
 
     if (glob_cols > glob_rows) {
         if (p_rank == MASTER) printf ("Invalid Input, n cannot be greater than m\n");
-        MPI_Abort(MPI_COMM_WORLD, 2);    }
+    }
     if (block_size > glob_rows) {
         if (p_rank == MASTER) printf ("Invalid Input, b cannot be greater than m\n");
-        MPI_Abort(MPI_COMM_WORLD, 3);
     }
 
     MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);
@@ -85,22 +86,26 @@ int main(int argc, char** argv) {
     {
         A = (double*) calloc(glob_rows * glob_cols, sizeof(double));
         printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns.\n\n", proc_size, proc_rows, proc_cols);
-        printf("Initializing array A: \n");
-
         /* Generate random matrix */
         srand(0);
         randMatrix(A, glob_cols, glob_rows);
-        if(DEBUG) printMatrix(A, glob_cols, glob_rows);
+        if(DEBUG) {
+            printf("Initializing array A: \n");
+            printMatrix(A, glob_cols, glob_rows);
+        }
     }
 
+    /* Start timer*/
+    t1 = MPI_Wtime();
+
     /************* Distribute Q across processes *********************/
-    
+
     /* NOTE: loc_cols = glob_cols / proc_cols */
     loc_cols = block_size; 
     loc_rows = glob_rows / proc_rows;
 
     Q = (double*) calloc(loc_cols * loc_rows, sizeof(double));
-    R = (double*) calloc(loc_cols * loc_cols, sizeof(double));
+    R = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     
     /* Master distributes Q across processes */
     if (p_rank == MASTER) {
@@ -145,7 +150,7 @@ int main(int argc, char** argv) {
     /************************ PBMGS **********************************/
 
     Qbar = (double*) calloc(loc_cols * loc_rows, sizeof(double));
-    Rbar = (double*) calloc(loc_cols * loc_cols, sizeof(double));
+    Rbar = (double*) calloc(loc_cols * loc_rows, sizeof(double));
 
     /* For each block */
     for (APC = 0; APC < proc_cols; ++APC) {
@@ -271,8 +276,10 @@ int main(int argc, char** argv) {
                     }
 
                     /* Set R if in the upper diagonal*/
-                    if (APC == p_row) {
-                        R[k*loc_cols + j] = Rbar[k*loc_cols + j];
+                    int target_p_row = (loc_rows * APC + j) / proc_rows;
+                    int target_l_row = (loc_rows * APC + k) % proc_rows;
+                    if (target_p_row == p_row) {
+                        R[target_l_row*loc_cols + j] = Rbar[k*loc_cols + j];
                     }
                 }
 
@@ -288,7 +295,7 @@ int main(int argc, char** argv) {
     /*********** Compile Q and R from local blocks *******************/
 
     double *Q_global = (double*) calloc(glob_cols * glob_rows, sizeof(double));
-    double *R_global = (double*) calloc(glob_cols * glob_cols, sizeof(double));
+    double *R_global = (double*) calloc(glob_cols * glob_rows, sizeof(double));
 
     /* Master compiles Q and R from across processes */
     if (p_rank == MASTER) {
@@ -333,6 +340,11 @@ int main(int argc, char** argv) {
             MASTER, COMP_R, MPI_COMM_WORLD);
     }  
 
+    /********************* Check Results *****************************/
+
+    /* End timer */
+    t2 = MPI_Wtime();
+
     if (p_rank == MASTER) {
         // Check error = A - QR (should be near 0)
         double* B = calloc(glob_cols * glob_rows, sizeof(double));
@@ -348,6 +360,7 @@ int main(int argc, char** argv) {
             }
         }
         free(B);
+        printf("Execution Time: %.3f ms\n", 1000 * (t2 - t1) );
         printf("Roundoff Error: %f\n\n", sum);
 
         if (glob_rows <= 25) {
