@@ -377,7 +377,7 @@ int main(int argc, char** argv) {
             printf("Matrix A:\n");
             printMatrix(A, glob_cols, glob_rows);
 
-            if (sum) {
+            if (sum != 0) {
                 printf("Matrix B:\n");
                 printMatrix(B, glob_cols, glob_rows);
             }
