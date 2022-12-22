@@ -353,17 +353,20 @@ int main(int argc, char** argv) {
     t2 = MPI_Wtime();
 
     if (p_rank == MASTER) {
-        // Check error = A - QR (should be near 0)
-        double* B = calloc(glob_cols * glob_rows, sizeof(double));
         double sum = 0;
-        for (i = 0; i < glob_rows; i++) {
-            for (j = 0; j < glob_cols; j++) {
-                B[i*glob_cols + j] = 0;
-                for (k = 0; k < glob_cols; k++) {
-                    B[i*glob_cols + j] += Q[i*glob_cols + k] * R[k*glob_cols + j];
-                }
+        double* B;
+        // Check error = A - QR (should be near 0)
+        if (glob_cols * glob_rows <= 1000000) {
+            B = calloc(glob_cols * glob_rows, sizeof(double));
+            for (i = 0; i < glob_rows; i++) {
+                for (j = 0; j < glob_cols; j++) {
+                    B[i*glob_cols + j] = 0;
+                    for (k = 0; k < glob_cols; k++) {
+                        B[i*glob_cols + j] += Q[i*glob_cols + k] * R[k*glob_cols + j];
+                    }
 
-                sum += fabs(B[i*glob_cols+j] - A[i*glob_cols+j]);
+                    sum += fabs(B[i*glob_cols+j] - A[i*glob_cols+j]);
+                }
             }
         }
 
@@ -373,8 +376,11 @@ int main(int argc, char** argv) {
         if (glob_rows <= 25) {
             printf("Matrix A:\n");
             printMatrix(A, glob_cols, glob_rows);
-            printf("Matrix B:\n");
-            printMatrix(B, glob_cols, glob_rows);
+
+            if (sum) {
+                printf("Matrix B:\n");
+                printMatrix(B, glob_cols, glob_rows);
+            }
 
             printf("Matrix Q:\n");
             printMatrix(Q, glob_cols, glob_cols);
