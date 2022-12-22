@@ -76,6 +76,10 @@ int main(int argc, char** argv) {
     proc_rows = proc_size / proc_cols;
     p_col = p_rank % proc_cols;
     p_row = p_rank / proc_cols;
+    
+    /* NOTE: loc_cols = glob_cols / proc_cols */
+    loc_cols = block_size; 
+    loc_rows = glob_rows / proc_rows;
 
     MPI_Comm_split(MPI_COMM_WORLD, p_col, p_rank, &col_comm);
     MPI_Comm_split(MPI_COMM_WORLD, p_row, p_rank, &row_comm);
@@ -85,7 +89,9 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER)
     {
         A = (double*) calloc(glob_rows * glob_cols, sizeof(double));
-        printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns.\n\n", proc_size, proc_rows, proc_cols);
+        printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
+        printf("Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
+
         /* Generate random matrix */
         srand(0);
         randMatrix(A, glob_cols, glob_rows);
@@ -99,10 +105,6 @@ int main(int argc, char** argv) {
     t1 = MPI_Wtime();
 
     /************* Distribute Q across processes *********************/
-
-    /* NOTE: loc_cols = glob_cols / proc_cols */
-    loc_cols = block_size; 
-    loc_rows = glob_rows / proc_rows;
 
     Q = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     R = (double*) calloc(loc_cols * loc_rows, sizeof(double));
@@ -181,8 +183,10 @@ int main(int argc, char** argv) {
 
                 /* Copy Qnorm into R for 
                     diagonal block (prow == pcol) */
-                if (p_row == p_col) {
-                    R[j*loc_cols + j] = Qnorm;
+                if (p_row == (APC * loc_cols + j) / loc_rows) {
+                    r_off = (APC * loc_cols + j) % loc_rows;
+                    if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, r_off+j, l);
+                    R[(r_off)*loc_cols + j] = Qnorm;
                 }     
 
                 // For upper triangular R[j, j+1:n]
@@ -210,9 +214,11 @@ int main(int argc, char** argv) {
                     }
 
                     /* Copy Qdot into R for 
-                        diagonal block (prow == pcol) */
-                    if (p_row == p_col) {
-                        R[j*loc_cols + l] = Qdot;
+                        diagonal block (p_row == (p_col * loc_cols) / loc_rows) */
+                    if (p_row == (APC * loc_cols + j) / loc_rows) {
+                        r_off = (APC * loc_cols + j) % loc_rows;
+                        if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qdot, r_off+j, l);
+                        R[(r_off)*loc_cols + l] = Qdot;
                     }
                 }
             }
@@ -276,9 +282,15 @@ int main(int argc, char** argv) {
                     }
 
                     /* Set R if in the upper diagonal */
-                    if (APC == p_row) {
-                        R[k*loc_cols + j] = Rbar[k*loc_cols + j];
+                    /* row in glob: APC * loc_cols + k
+                       rows of block: [p_row * loc_rows, (p_row+1) * loc_rows) */
+                    
+                    if (p_row == (APC * loc_cols + k) / loc_rows)
+                    {
+                        r_off = (APC * loc_cols + k) % loc_rows;
+                        R[(r_off)*loc_cols + j] = Rbar[k*loc_cols + j];
                     }
+
                 }
 
                 if(DEBUG) {
@@ -305,7 +317,7 @@ int main(int argc, char** argv) {
                 if (target != p_rank) {
                     MPI_Recv(Q, loc_cols * loc_rows, MPI_DOUBLE,
                         target, COMP_Q, MPI_COMM_WORLD, &status);
-                    MPI_Recv(R, loc_cols * loc_cols, MPI_DOUBLE,
+                    MPI_Recv(R, loc_cols * loc_rows, MPI_DOUBLE,
                         target, COMP_R, MPI_COMM_WORLD, &status);
                 }
 
@@ -317,8 +329,10 @@ int main(int argc, char** argv) {
                         Q_global[ (r_off + l) * glob_cols + (c_off + k) ] 
                             = Q[l*loc_cols + k];
                     }
-                    for (l = 0; l < loc_cols; ++l) {
-                        R_global[ (R_r_off + l) * glob_cols + (c_off + k) ] 
+                }
+                for (k = 0; k < loc_cols; ++k) {
+                    for (l = 0; l < loc_rows; ++l) {
+                        R_global[ (r_off + l) * glob_cols + (c_off + k) ] 
                             = R[l*loc_cols + k];
                     }
                 }
@@ -334,7 +348,7 @@ int main(int argc, char** argv) {
     if (p_rank > MASTER) {
         MPI_Send(Q, loc_cols * loc_rows, MPI_DOUBLE,
             MASTER, COMP_Q, MPI_COMM_WORLD);
-        MPI_Send(R, loc_cols * loc_cols, MPI_DOUBLE,
+        MPI_Send(R, loc_cols * loc_rows, MPI_DOUBLE,
             MASTER, COMP_R, MPI_COMM_WORLD);
     }  
 
@@ -357,16 +371,18 @@ int main(int argc, char** argv) {
                 sum += fabs(B[i*glob_cols+j] - A[i*glob_cols+j]);
             }
         }
-        free(B);
+
         printf("Execution Time: %.3f ms\n", 1000 * (t2 - t1) );
         printf("Roundoff Error: %f\n\n", sum);
 
         if (glob_rows <= 25) {
             printf("Matrix A:\n");
             printMatrix(A, glob_cols, glob_rows);
+            printf("Matrix B:\n");
+            printMatrix(B, glob_cols, glob_rows);
 
             printf("Matrix Q:\n");
-            printMatrix(Q, glob_cols, glob_rows);
+            printMatrix(Q, glob_cols, glob_cols);
 
             printf("Matrix R:\n");
             printMatrix(R, glob_cols, glob_cols);
