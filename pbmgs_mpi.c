@@ -275,11 +275,9 @@ int main(int argc, char** argv) {
                         Q[l*loc_cols + j] -= Rbar[k*loc_cols + j] * Qbar[l*loc_cols + k];
                     }
 
-                    /* Set R if in the upper diagonal*/
-                    int target_p_row = (loc_rows * APC + j) / proc_rows;
-                    int target_l_row = (loc_rows * APC + k) % proc_rows;
-                    if (target_p_row == p_row) {
-                        R[target_l_row*loc_cols + j] = Rbar[k*loc_cols + j];
+                    /* Set R if in the upper diagonal */
+                    if (APC == p_row) {
+                        R[k*loc_cols + j] = Rbar[k*loc_cols + j];
                     }
                 }
 
