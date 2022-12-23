@@ -353,10 +353,11 @@ int main(int argc, char** argv) {
     t2 = MPI_Wtime();
 
     if (p_rank == MASTER) {
-        double sum = 0;
+        double sum = -1;
         double* B;
         // Check error = A - QR (should be near 0)
-        if (glob_cols * glob_rows <= 1000000) {
+        if (glob_cols < 1000 && glob_rows < 1000) {
+            sum = 0;
             B = calloc(glob_cols * glob_rows, sizeof(double));
             for (i = 0; i < glob_rows; i++) {
                 for (j = 0; j < glob_cols; j++) {
@@ -370,14 +371,14 @@ int main(int argc, char** argv) {
             }
         }
 
-        printf("Execution Time: %.3f ms\n", 1000 * (t2 - t1) );
-        printf("Roundoff Error: %f\n\n", sum);
+        if (sum >= 0) printf("Roundoff Error: %f\n", sum);
+        printf("Execution Time: %.3f ms\n\n", 1000 * (t2 - t1) );
 
         if (glob_rows <= 25) {
             printf("Matrix A:\n");
             printMatrix(A, glob_cols, glob_rows);
 
-            if (sum != 0) {
+            if (sum >= 0) {
                 printf("Matrix B:\n");
                 printMatrix(B, glob_cols, glob_rows);
             }
