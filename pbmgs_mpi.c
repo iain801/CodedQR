@@ -103,8 +103,8 @@ void gatherQR(double** Q, double** R, int p_rank,
 
     /* Master compiles Q and R from across processes */
     if (p_rank == MASTER) {
-        double *Q_global = (double*) calloc(glob_cols * glob_rows, sizeof(double));
-        double *R_global = (double*) calloc(glob_cols * glob_rows, sizeof(double));
+        double *Q_global = (double*) malloc(glob_cols * glob_rows * sizeof(double));
+        double *R_global = (double*) malloc(glob_cols * glob_rows * sizeof(double));
         for (i = 0; i < proc_cols; ++i) {
             for (j = 0; j < proc_rows; ++j) {
 
@@ -208,7 +208,7 @@ int main(int argc, char** argv) {
 
     if (p_rank == MASTER)
     {
-        A = (double*) calloc(glob_rows * glob_cols, sizeof(double));
+        A = (double*) malloc(glob_rows * glob_cols * sizeof(double));
         printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
         printf("Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
 
@@ -226,15 +226,15 @@ int main(int argc, char** argv) {
 
     /************* Distribute Q across processes *********************/
 
-    Q = (double*) calloc(loc_cols * loc_rows, sizeof(double));
-    R = (double*) calloc(loc_cols * loc_rows, sizeof(double));
+    Q = (double*) malloc(loc_cols * loc_rows * sizeof(double));
+    R = (double*) malloc(loc_cols * loc_rows * sizeof(double));
     
     distributeQ(A, Q, p_rank, proc_cols, proc_rows, glob_cols, glob_rows);
 
     /************************ PBMGS **********************************/
 
-    Qbar = (double*) calloc(loc_cols * loc_rows, sizeof(double));
-    Rbar = (double*) calloc(loc_cols * loc_rows, sizeof(double));
+    Qbar = (double*) malloc(loc_cols * loc_rows * sizeof(double));
+    Rbar = (double*) malloc(loc_cols * loc_rows * sizeof(double));
 
     /* For each block */
     for (APC = 0; APC < proc_cols; ++APC) {
@@ -410,7 +410,7 @@ int main(int argc, char** argv) {
     
         // Check error = A - QR (should be near 0)
         if (glob_cols < 1000 && glob_rows < 1000) {
-            double* B = calloc(glob_cols * glob_rows, sizeof(double));
+            double* B = malloc(glob_cols * glob_rows * sizeof(double));
             double sum = checkError(A, Q, R, B, glob_cols, glob_rows);
             printf("Roundoff Error: %f\n", sum);            
             if (sum > 0 && glob_rows <= 25) {
