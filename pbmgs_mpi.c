@@ -136,10 +136,6 @@ void gatherQR(double** Q, double** R, int p_rank,
                     for (l = 0; l < loc_rows; ++l) {
                         Q_global[ (r_off + l) * glob_cols + (c_off + k) ] 
                             = (*Q)[l*loc_cols + k];
-                    }
-                }
-                for (k = 0; k < loc_cols; ++k) {
-                    for (l = 0; l < loc_rows; ++l) {
                         R_global[ (r_off + l) * glob_cols + (c_off + k) ] 
                             = (*R)[l*loc_cols + k];
                     }
@@ -237,7 +233,7 @@ int main(int argc, char** argv) {
     /* Start timer*/
     t1 = MPI_Wtime();
 
-    /************* Distribute Q across processes *********************/
+    /************* Distribute A across processes *********************/
 
     Q = (double*) malloc(loc_cols * loc_rows * sizeof(double));
     R = (double*) malloc(loc_cols * loc_rows * sizeof(double));
