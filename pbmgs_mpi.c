@@ -17,6 +17,12 @@
 #include <time.h>
 #include <stdio.h>
 
+#include <stdlib.h>
+#include <math.h>
+#include <mpi.h>
+#include <time.h>
+#include <stdio.h>
+
 void printMatrix(double* matrix, int n, int m) {
     for (int i = 0; i < m; ++i) {
         for (int j = 0; j < n; ++j) {
@@ -50,21 +56,21 @@ double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int
     return sum;
 }
 
-#define MASTER 0                /* taskid of first task */
-#define DIST_Q 1
-#define COMP_Q 2
-#define COMP_R 3
+#define MASTER 0    /* taskid of first task */
+#define DIST_Q 1    /* code for mpi send/recv */
+#define COMP_Q 2    /* code for mpi send/recv */
+#define COMP_R 3    /* code for mpi send/recv */
 
-#define DEBUG 0
+#define DEBUG 0     /* run in debug mode */
 
-void distributeQ(double* A, double* Q, int p_rank, 
+void scatterA(double* A, double* Q, int p_rank, 
     int proc_cols, int proc_rows, int glob_cols, int glob_rows) {
     
     int i, j, k, l;
     int loc_cols = glob_cols / proc_cols;
     int loc_rows = glob_rows / proc_rows;
 
-    /* Master distributes Q across processes */
+    /* Master distributes A across process Q matrices */
     if (p_rank == MASTER) {
         /* NOTE: after all operations, Q will be 
             left as local Q for master process */
@@ -233,12 +239,12 @@ int main(int argc, char** argv) {
     /* Start timer*/
     t1 = MPI_Wtime();
 
-    /************* Distribute A across processes *********************/
+    /************* Distribute A across process Q *********************/
 
     Q = (double*) malloc(loc_cols * loc_rows * sizeof(double));
     R = (double*) malloc(loc_cols * loc_rows * sizeof(double));
     
-    distributeQ(A, Q, p_rank, proc_cols, proc_rows, glob_cols, glob_rows);
+    scatterA(A, Q, p_rank, proc_cols, proc_rows, glob_cols, glob_rows);
 
     /************************ PBMGS **********************************/
 
