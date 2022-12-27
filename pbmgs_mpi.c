@@ -1,3 +1,16 @@
+/* Parallel Block Modified Gram Schmidt
+ * implementation with MPI
+ * for random rectangular matrix A(n,m) 
+ * Using MGS in place of ICGS 
+ * Takes arguements of: 
+ *      np = (From MPI) number of submatrices
+ *      n = global column count 
+ *      m = global row count 
+ *      b = submatrix column count
+ *
+ * Iain Weissburg 2022
+ */
+
 #include <stdlib.h>
 #include <math.h>
 #include <mpi.h>

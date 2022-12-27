@@ -1,3 +1,14 @@
+/* Block Modified Gram Schmidt implelemtation
+ * for random rectangular matrix A(n,m) 
+ * Using MGS in place of ICGS 
+ * Takes arguements of: 
+ *      n = column count 
+ *      m = row count 
+ *      b = block size
+ *
+ * Iain Weissburg 2022
+ */
+
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
