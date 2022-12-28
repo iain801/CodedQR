@@ -17,6 +17,13 @@
 #include <time.h>
 #include <stdio.h>
 
+#define MASTER 0    /* taskid of first task */
+#define DIST_Q 1    /* code for mpi send/recv */
+#define COMP_Q 2    /* code for mpi send/recv */
+#define COMP_R 3    /* code for mpi send/recv */
+
+#define DEBUG 0     /* run in debug mode */
+
 void printMatrix(double* matrix, int n, int m) {
     for (int i = 0; i < m; ++i) {
         for (int j = 0; j < n; ++j) {
@@ -49,13 +56,6 @@ double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int
 
     return sum;
 }
-
-#define MASTER 0    /* taskid of first task */
-#define DIST_Q 1    /* code for mpi send/recv */
-#define COMP_Q 2    /* code for mpi send/recv */
-#define COMP_R 3    /* code for mpi send/recv */
-
-#define DEBUG 0     /* run in debug mode */
 
 void scatterA(double* A, double* Q, int p_rank, 
     int proc_cols, int proc_rows, int glob_cols, int glob_rows) {
@@ -157,93 +157,23 @@ void gatherQR(double** Q, double** R, int p_rank,
     }  
 }
 
+void pbmgs(double* Q, double* R, int p_rank, 
+    int proc_cols, int proc_rows, int loc_cols, int loc_rows) {
 
-int main(int argc, char** argv) {
-    
-    int	proc_size,              /* number of tasks in partition */
-        p_rank,                 /* a task identifier */
-        i, j, k, l,             /* iterators */
-        glob_cols, glob_rows,   /* global matrix dimensions */
-        block_size,             /* width of each local block */
-        proc_cols, proc_rows,   /* processor grid dimensions */
-        p_col, p_row,           /* processor coordinates in grid (aka color) */
-        loc_cols, loc_rows,     /* local block dimensions */
-        APC;                    /* active process column */
-    double *A, *Q, *R,          /* main i/o matrices */
-        *Qbar, *Rbar,           /* broadcast matrix */
-        Qnorm, Qdot,            /* operation variables */
-        Qnorm_loc, Qdot_loc;    /* operation local matrices */
+    int APC,                        /* active process column */
+        i, j, k, l;                 /* iterators */
+    double  Qnorm, Qdot,            /* operation variables */
+            Qnorm_loc, Qdot_loc;    /* operation local matrices */
 
     MPI_Comm row_comm, col_comm;
-
-    double t1, t2;              /* timer */
-
-    /*********************** Initialize MPI *****************************/
-
-    MPI_Init (&argc, &argv);
-    
-    if (argc != 4) {
-        if (p_rank == MASTER) printf ("Invalid Input, must have arguements: m=rows n=cols b=blocksize \n");
-        MPI_Abort(MPI_COMM_WORLD, 1);
-    }
-    
-    glob_cols = atoi(argv[1]);
-    glob_rows = atoi(argv[2]);
-    block_size = atoi(argv[3]);
-
-    if (glob_cols > glob_rows) {
-        if (p_rank == MASTER) printf ("Invalid Input, n cannot be greater than m\n");
-    }
-    if (block_size > glob_rows) {
-        if (p_rank == MASTER) printf ("Invalid Input, b cannot be greater than m\n");
-    }
-
-    MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
-
-    proc_cols = glob_cols / block_size;
-    proc_rows = proc_size / proc_cols;
-    p_col = p_rank % proc_cols;
-    p_row = p_rank / proc_cols;
-    
-    /* NOTE: loc_cols = glob_cols / proc_cols */
-    loc_cols = block_size; 
-    loc_rows = glob_rows / proc_rows;
+    int p_col = p_rank % proc_cols;
+    int p_row = p_rank / proc_cols;
 
     MPI_Comm_split(MPI_COMM_WORLD, p_col, p_rank, &col_comm);
     MPI_Comm_split(MPI_COMM_WORLD, p_row, p_rank, &row_comm);
 
-    /******************* Initialize arrays ***************************/
-
-    if (p_rank == MASTER)
-    {
-        A = (double*) malloc(glob_rows * glob_cols * sizeof(double));
-        printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
-        printf("Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
-
-        /* Generate random matrix */
-        srand(0);
-        randMatrix(A, glob_cols, glob_rows);
-        if(DEBUG) {
-            printf("Initializing array A: \n");
-            printMatrix(A, glob_cols, glob_rows);
-        }
-    }
-
-    /* Start timer*/
-    t1 = MPI_Wtime();
-
-    /************* Distribute A across process Q *********************/
-
-    Q = (double*) malloc(loc_cols * loc_rows * sizeof(double));
-    R = (double*) malloc(loc_cols * loc_rows * sizeof(double));
-    
-    scatterA(A, Q, p_rank, proc_cols, proc_rows, glob_cols, glob_rows);
-
-    /************************ PBMGS **********************************/
-
-    Qbar = (double*) malloc(loc_cols * loc_rows * sizeof(double));
-    Rbar = (double*) malloc(loc_cols * loc_rows * sizeof(double));
+    double* Qbar = (double*) malloc(loc_cols * loc_rows * sizeof(double));
+    double* Rbar = (double*) malloc(loc_cols * loc_rows * sizeof(double));
 
     /* For each block */
     for (APC = 0; APC < proc_cols; ++APC) {
@@ -295,7 +225,7 @@ int main(int argc, char** argv) {
                         MPI_DOUBLE, MPI_SUM, col_comm);
 
                     if(DEBUG) {
-                        printf("Qdot_%d: %.3f\n\n", p_col*block_size + l, Qdot);
+                        printf("Qdot_%d: %.3f\n\n", p_col*loc_cols + l, Qdot);
                     }
 
                     // Q[:,l] = Q[:,l] - Qdot * Qbar
@@ -386,6 +316,83 @@ int main(int argc, char** argv) {
             }
         }
     }
+}
+
+
+int main(int argc, char** argv) {
+    
+    int	proc_size,              /* number of tasks in partition */
+        p_rank,                 /* a task identifier */ 
+        glob_cols, glob_rows,   /* global matrix dimensions */
+        block_size,             /* width of each local block */
+        proc_cols, proc_rows,   /* processor grid dimensions */
+        loc_cols, loc_rows;     /* local block dimensions */
+    double *A, *Q, *R;          /* main i/o matrices */
+
+    double t1, t2;              /* timer */
+
+    /*********************** Initialize MPI *****************************/
+
+    MPI_Init (&argc, &argv);
+    
+    if (argc != 4) {
+        if (p_rank == MASTER) printf ("Invalid Input, must have arguements: m=rows n=cols b=blocksize \n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+    
+    glob_cols = atoi(argv[1]);
+    glob_rows = atoi(argv[2]);
+    block_size = atoi(argv[3]);
+
+    if (glob_cols > glob_rows) {
+        if (p_rank == MASTER) printf ("Invalid Input, n cannot be greater than m\n");
+    }
+    if (block_size > glob_rows) {
+        if (p_rank == MASTER) printf ("Invalid Input, b cannot be greater than m\n");
+    }
+
+    MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);    
+
+    proc_cols = glob_cols / block_size;
+    proc_rows = proc_size / proc_cols;
+    
+    /* NOTE: loc_cols = glob_cols / proc_cols */
+    loc_cols = block_size; 
+    loc_rows = glob_rows / proc_rows;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);
+
+    /******************* Initialize arrays ***************************/
+
+    if (p_rank == MASTER)
+    {
+        A = (double*) malloc(glob_rows * glob_cols * sizeof(double));
+        printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
+        printf("Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
+
+        /* Generate random matrix */
+        srand(0);
+        randMatrix(A, glob_cols, glob_rows);
+        if(DEBUG) {
+            printf("Initializing array A: \n");
+            printMatrix(A, glob_cols, glob_rows);
+        }
+    }
+
+    /* Start timer*/
+    t1 = MPI_Wtime();
+
+    /************* Distribute A across process Q *********************/
+
+    Q = (double*) malloc(loc_cols * loc_rows * sizeof(double));
+    R = (double*) malloc(loc_cols * loc_rows * sizeof(double));
+    
+    scatterA(A, Q, p_rank, proc_cols, proc_rows, glob_cols, glob_rows);
+
+    /************************ PBMGS **********************************/
+
+    pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
 
     /*********** Compile Q and R from local blocks *******************/
 
