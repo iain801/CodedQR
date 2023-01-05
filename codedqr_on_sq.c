@@ -21,6 +21,7 @@
 #define COMP_R 3    /* code for mpi send/recv */
 
 #define DEBUG 0     /* run in debug mode */
+#define SET_SEED 0  /* whether to set srand to 0 */
 
 void printMatrix(double* matrix, int n, int m) {
     for (int i = 0; i < m; ++i) {
@@ -32,9 +33,15 @@ void printMatrix(double* matrix, int n, int m) {
     printf("\n");
 }
 
+/* uniform random in range [rangeLow, rangeHigh] */
+double uniform(int rangeLow, int rangeHigh) {
+    return ((double)rand()/(double)RAND_MAX) * (rangeHigh - rangeLow) + rangeLow;
+}
+
 void randMatrix(double* A, int n, int m) {
-    for (int i = 0; i < n * m; ++i) {
-        A[i] = (rand() % 10 - 5) / 1.0;
+    int size = n * m;
+    for (int i = 0; i < size; ++i) {
+        A[i] = uniform(0,1);
     }
 }
 
@@ -53,6 +60,54 @@ double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int
     }
 
     return sum;
+}
+
+void constructGh(double* Gh, int proc_cols, int f, int loc_cols) {
+    int i, j, k;
+
+    double* V = malloc(f * (proc_cols - f) * sizeof(double));
+    randMatrix(V, proc_cols - f, f);
+
+    double* G_pre = malloc(f * proc_cols * sizeof(double));
+    for (i = 0; i < f; ++i) {
+        for (j = 0; j < f; ++j) {
+            G_pre[i*proc_cols + j] = 0;
+            for (k = 0; k < (proc_cols - f); ++k) {
+                G_pre[i*proc_cols + j] -= V[i*f + k] * V[j*f + k] / 2;
+            }
+        }
+        for (k = f; k < proc_cols; ++k) {
+            G_pre[i*proc_cols + k] = V[i*f + k];
+        }
+    }
+
+    free(V);
+
+    int G_cols = loc_cols * proc_cols;
+    int G_rows = loc_cols * f;
+    int r_off, c_off;
+    for (i = 0; i < f; ++i) {
+        r_off = i * loc_cols;
+        for (j = 0; j < proc_cols; ++j) {
+            c_off = j * loc_cols;
+            for (k = 0; k < loc_cols; ++k) {
+                Gh[(r_off + k) * G_cols + (c_off + k)] = G_pre[i*proc_cols + j];
+            }
+        }
+    }
+}
+
+void constructGv(double* Gv, int proc_rows, int f, int loc_rows) {
+    double* Gh = malloc(proc_rows * loc_rows * f * loc_rows * sizeof(double));
+    constructGh(Gh, proc_rows, f, loc_rows);
+    int G_cols = loc_rows * f;
+    int G_rows = loc_rows * proc_rows;
+    for (int i = 0; i < G_cols; ++i) {
+        for (int j = 0; j < G_rows; ++j) {
+            Gv[j * G_rows + i] = Gh[i * G_cols + j];
+        }
+    }
+    free(Gh);
 }
 
 void scatterA(double* A, double* Q, int p_rank, 
@@ -322,7 +377,8 @@ int main(int argc, char** argv) {
         p_rank,                 /* a task identifier */ 
         glob_n,                 /* global matrix dimensions (n in literature) */
         proc_n,                 /* processor grid dimensions (p_r = p_c in literature) */
-        loc_n;                  /* local block dimensions (b in literature) */
+        loc_n,                  /* local block dimensions (b in literature) */
+        max_fails;              /* maximum tolerable failiures (f in literature) */
     double *A, *Q, *R;          /* main i/o matrices */
 
     double t1, t2;              /* timer */
@@ -331,12 +387,13 @@ int main(int argc, char** argv) {
 
     MPI_Init (&argc, &argv);
     
-    if (argc != 2) {
-        if (p_rank == MASTER) printf ("Invalid Input, must have arguements: n=matrix size\n");
+    if (argc != 3) {
+        if (p_rank == MASTER) printf ("Invalid Input, must have arguements: n, f\n");
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
     
     glob_n = atoi(argv[1]);
+    max_fails = atoi(argv[2]);
 
     MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);    
@@ -365,11 +422,12 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER)
     {
         A = (double*) malloc(glob_n * glob_n * sizeof(double));
-        printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns\n", proc_size, proc_n, proc_n);
-        printf("Each process has %d rows and %d columns\n\n", loc_n, loc_n);
+        printf("codedqr_on_sq has started with %d tasks in %d rows and columns\n", proc_size, proc_n);
+        printf("Each process has %d rows and columns\n\n", loc_n);
 
         /* Generate random matrix */
-        srand(0);
+        if(SET_SEED) srand(0);
+        else srand(MPI_Wtime());
         randMatrix(A, glob_n, glob_n);
         if(DEBUG) {
             printf("Initializing array A: \n");
