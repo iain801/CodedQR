@@ -1,14 +1,12 @@
-/* Parallel Block Modified Gram Schmidt
- * implementation with MPI
- * for random rectangular matrix A(n,m) 
+/* Coded Parallel Block Modified Gram Schmidt
+ * implementation with MPI using out-of-node checksum
+ * for random square matrix A(n,n)
  * Using MGS in place of ICGS 
  * Takes arguements of: 
  *      np = (From MPI) number of submatrices
- *      n = global column count 
- *      m = global row count 
- *      b = submatrix column count
+ *      n = global matrix size 
  *
- * Iain Weissburg 2022
+ * Iain Weissburg 2023
  */
 
 #include <stdlib.h>
@@ -318,15 +316,13 @@ void pbmgs(double* Q, double* R, int p_rank,
     }
 }
 
-
 int main(int argc, char** argv) {
     
     int	proc_size,              /* number of tasks in partition */
         p_rank,                 /* a task identifier */ 
-        glob_cols, glob_rows,   /* global matrix dimensions */
-        block_size,             /* width of each local block */
-        proc_cols, proc_rows,   /* processor grid dimensions */
-        loc_cols, loc_rows;     /* local block dimensions */
+        glob_n,                 /* global matrix dimensions (n in literature) */
+        proc_n,                 /* processor grid dimensions (p_r = p_c in literature) */
+        loc_n;                  /* local block dimensions (b in literature) */
     double *A, *Q, *R;          /* main i/o matrices */
 
     double t1, t2;              /* timer */
@@ -335,46 +331,49 @@ int main(int argc, char** argv) {
 
     MPI_Init (&argc, &argv);
     
-    if (argc != 4) {
-        if (p_rank == MASTER) printf ("Invalid Input, must have arguements: m=rows n=cols b=blocksize \n");
+    if (argc != 2) {
+        if (p_rank == MASTER) printf ("Invalid Input, must have arguements: n=matrix size\n");
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
     
-    glob_cols = atoi(argv[1]);
-    glob_rows = atoi(argv[2]);
-    block_size = atoi(argv[3]);
-
-    if (glob_cols > glob_rows) {
-        if (p_rank == MASTER) printf ("Invalid Input, n cannot be greater than m\n");
-    }
-    if (block_size > glob_rows) {
-        if (p_rank == MASTER) printf ("Invalid Input, b cannot be greater than m\n");
-    }
+    glob_n = atoi(argv[1]);
 
     MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);    
 
-    proc_cols = glob_cols / block_size;
-    proc_rows = proc_size / proc_cols;
+    proc_n = (int) sqrt(proc_size);
+
+    if (proc_size != proc_n * proc_n) {
+        if (p_rank == MASTER) printf ("Invalid Input, np must be a perfect square\n");
+        MPI_Abort(MPI_COMM_WORLD, 3);
+    }
     
-    /* NOTE: loc_cols = glob_cols / proc_cols */
-    loc_cols = block_size; 
-    loc_rows = glob_rows / proc_rows;
+    loc_n = glob_n / proc_n;
+
+    if (!loc_n) {
+        if (p_rank == MASTER) printf ("Invalid Input, n^2 must be greater than np\n");
+        MPI_Abort(MPI_COMM_WORLD, 2);
+    }
+
+    else if (glob_n != loc_n * proc_n) {
+        if (p_rank == MASTER) printf ("Invalid Input, n must be divisible by b=sqrt(np)\n");
+        MPI_Abort(MPI_COMM_WORLD, 4);
+    }
 
     /******************* Initialize arrays ***************************/
 
     if (p_rank == MASTER)
     {
-        A = (double*) malloc(glob_rows * glob_cols * sizeof(double));
-        printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
-        printf("Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
+        A = (double*) malloc(glob_n * glob_n * sizeof(double));
+        printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns\n", proc_size, proc_n, proc_n);
+        printf("Each process has %d rows and %d columns\n\n", loc_n, loc_n);
 
         /* Generate random matrix */
         srand(0);
-        randMatrix(A, glob_cols, glob_rows);
+        randMatrix(A, glob_n, glob_n);
         if(DEBUG) {
             printf("Initializing array A: \n");
-            printMatrix(A, glob_cols, glob_rows);
+            printMatrix(A, glob_n, glob_n);
         }
     }
 
@@ -383,18 +382,18 @@ int main(int argc, char** argv) {
 
     /************* Distribute A across process Q *********************/
 
-    Q = (double*) malloc(loc_cols * loc_rows * sizeof(double));
-    R = (double*) malloc(loc_cols * loc_rows * sizeof(double));
+    Q = (double*) malloc(loc_n * loc_n * sizeof(double));
+    R = (double*) malloc(loc_n * loc_n * sizeof(double));
     
-    scatterA(A, Q, p_rank, proc_cols, proc_rows, glob_cols, glob_rows);
+    scatterA(A, Q, p_rank, proc_n, proc_n, glob_n, glob_n);
 
     /************************ PBMGS **********************************/
 
-    pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+    pbmgs(Q, R, p_rank, proc_n, proc_n, loc_n, loc_n);
 
     /*********** Compile Q and R from local blocks *******************/
 
-    gatherQR(&Q, &R, p_rank, proc_cols, proc_rows, glob_cols, glob_rows);
+    gatherQR(&Q, &R, p_rank, proc_n, proc_n, glob_n, glob_n);
 
     /********************* Check Results *****************************/
 
@@ -410,27 +409,27 @@ int main(int argc, char** argv) {
 
     if (p_rank == MASTER) {
 
-        if (glob_rows <= 25) {
+        if (glob_n <= 25) {
             printf("\n");
             printf("Matrix A:\n");
-            printMatrix(A, glob_cols, glob_rows);
+            printMatrix(A, glob_n, glob_n);
 
             printf("Matrix Q:\n");
-            printMatrix(Q, glob_cols, glob_cols);
+            printMatrix(Q, glob_n, glob_n);
 
             printf("Matrix R:\n");
-            printMatrix(R, glob_cols, glob_cols);
+            printMatrix(R, glob_n, glob_n);
         }
     
         // Check error = A - QR (should be near 0)
-        if (glob_cols < 1000 && glob_rows < 1000) {
-            double* B = malloc(glob_cols * glob_rows * sizeof(double));
-            double sum = checkError(A, Q, R, B, glob_cols, glob_rows);
-            if (sum > 0 && glob_rows <= 25) {
+        if (glob_n < 1000 && glob_n < 1000) {
+            double* B = malloc(glob_n * glob_n * sizeof(double));
+            double sum = checkError(A, Q, R, B, glob_n, glob_n);          
+            if (sum > 0 && glob_n <= 25) {
                 printf("Matrix B:\n");
-                printMatrix(B, glob_cols, glob_rows);
+                printMatrix(B, glob_n, glob_n);
             }
-            printf("Roundoff Error: %f\n", sum);    
+            printf("Roundoff Error: %f\n", sum); 
         }
         printf("Execution Time: %.3f ms\n", t2);
     }
