@@ -1,5 +1,5 @@
 /* Coded Parallel Block Modified Gram Schmidt
- * implementation with MPI using out-of-node checksum
+ * implementation with MPI using [INSERT] checksum storage
  * for random square matrix A(n,n)
  * Using MGS in place of ICGS 
  * Takes arguements of: 
