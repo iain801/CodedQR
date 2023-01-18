@@ -62,7 +62,8 @@ double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int
     return sum;
 }
 
-void constructGh(double* Gh, int proc_cols, int f, int loc_cols) {
+/* Actually Gv for Q-Factor protection */
+void constructGv(double* Gv, int proc_cols, int f, int loc_cols) {
     int i, j, k;
 
     double* V = malloc(f * (proc_cols - f) * sizeof(double));
@@ -91,23 +92,31 @@ void constructGh(double* Gh, int proc_cols, int f, int loc_cols) {
         for (j = 0; j < proc_cols; ++j) {
             c_off = j * loc_cols;
             for (k = 0; k < loc_cols; ++k) {
-                Gh[(r_off + k) * G_cols + (c_off + k)] = G_pre[i*proc_cols + j];
+                Gv[(r_off + k) * G_cols + (c_off + k)] = G_pre[i*proc_cols + j];
             }
         }
     }
 }
 
-void constructGv(double* Gv, int proc_rows, int f, int loc_rows) {
-    double* Gh = malloc(proc_rows * loc_rows * f * loc_rows * sizeof(double));
-    constructGh(Gh, proc_rows, f, loc_rows);
+/* Actually Gh for R-factor protection, completely random
+    IGNORE FOR NOW */
+void constructGh(double* Gh, int proc_rows, int f, int loc_rows) {
+    int i, j, k;
+    double* G_pre = malloc(f * proc_rows * sizeof(double));
+    randMatrix(G_pre, proc_rows, f);
+    
     int G_cols = loc_rows * f;
     int G_rows = loc_rows * proc_rows;
-    for (int i = 0; i < G_cols; ++i) {
-        for (int j = 0; j < G_rows; ++j) {
-            Gv[j * G_rows + i] = Gh[i * G_cols + j];
+    int r_off, c_off;
+    for (i = 0; i < proc_rows; ++i) {
+        r_off = i * loc_rows;
+        for (j = 0; j < f; ++j) {
+            c_off = j * loc_rows;
+            for (k = 0; k < loc_rows; ++k) {
+                Gh[(r_off + k) * G_cols + (c_off + k)] = G_pre[i*proc_rows + j];
+            }
         }
     }
-    free(Gh);
 }
 
 void scatterA(double* A, double* Q, int p_rank, 
