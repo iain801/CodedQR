@@ -257,10 +257,7 @@ void pbmgs(double* Q, double* R, int p_rank,
                     MPI_SUM, col_comm);
 
                 /* Set zero values to near-zero */
-                if (Qnorm == 0) 
-                    Qnorm = 2.3e-308;
-                else 
-                    Qnorm = sqrt(Qnorm);
+                Qnorm = sqrt(Qnorm);
 
                 /* Normalize local portions of Qbar */
                 for (k = 0; k < loc_rows; ++k)
