@@ -23,6 +23,7 @@
 #define COMP_R 3    /* code for mpi send/recv */
 
 #define DEBUG 0     /* run in debug mode */
+#define SET_SEED 1  /* whether to set srand to 0 */
 
 void printMatrix(double* matrix, int n, int m) {
     for (int i = 0; i < m; ++i) {
@@ -370,7 +371,8 @@ int main(int argc, char** argv) {
         printf("Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
 
         /* Generate random matrix */
-        srand(0);
+        if(SET_SEED) srand(0);
+        else srand(MPI_Wtime());
         randMatrix(A, glob_cols, glob_rows);
         if(DEBUG) {
             printf("Initializing array A: \n");
