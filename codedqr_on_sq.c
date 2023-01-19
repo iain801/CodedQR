@@ -4,7 +4,8 @@
  * Using MGS in place of ICGS 
  * Takes arguements of: 
  *      np = (From MPI) number of submatrices
- *      n = global matrix size 
+ *      n = global matrix dimension (n x n matrix) 
+ *      f = number of tolerable faults
  *
  * Iain Weissburg 2023
  */
