@@ -383,7 +383,7 @@ int main(int argc, char** argv) {
     /************* Distribute A across process Q *********************/
 
     Q = (double*) malloc(loc_cols * loc_rows * sizeof(double));
-    R = (double*) malloc(loc_cols * loc_rows * sizeof(double));
+    R = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     
     scatterA(A, Q, p_rank, proc_cols, proc_rows, glob_cols, glob_rows);
 
