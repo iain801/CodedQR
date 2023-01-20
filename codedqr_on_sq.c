@@ -46,18 +46,27 @@ void randMatrix(double* A, int n, int m) {
     }
 }
 
+/* sets C = AB */
+void matrixMultiply(double* A, double* B, double* C, int a_cols, int a_rows, int b_cols, int b_rows) {
+    int i, j, k;
+    for (i = 0; i < a_rows; ++i) {
+        for (j = 0; j < b_cols; ++j) {
+            C[i*b_cols + j] = 0;
+            for (k = 0; k < a_cols; ++k) {
+                C[i*b_cols + j] += A[i*a_cols + k] * B[k*b_cols + j];
+            }
+        }
+    }
+}
+
+/* sets B = QR and returns 1-norm of A - B */
 double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int glob_rows) {
     int i, j, k;
     double sum = 0;
-    for (i = 0; i < glob_rows; i++) {
-        for (j = 0; j < glob_cols; j++) {
-            B[i*glob_cols + j] = 0;
-            for (k = 0; k < glob_cols; k++) {
-                B[i*glob_cols + j] += Q[i*glob_cols + k] * R[k*glob_cols + j];
-            }
+    matrixMultiply(Q, R, B, glob_cols, glob_rows, glob_cols, glob_rows);
 
-            sum += fabs(B[i*glob_cols+j] - A[i*glob_cols+j]);
-        }
+    for (i = 0; i < glob_rows * glob_cols; ++i) {
+        sum += fabs(B[i] - A[i]);
     }
 
     return sum;
@@ -441,6 +450,14 @@ int main(int argc, char** argv) {
             printMatrix(A, glob_n, glob_n);
         }
     }
+    /* TODO: 
+     *  - Generate Gh 
+     *  - append AGh to right of A
+     *  - Generate Gv
+     *  - append GvA and GvAGh to bottom of A
+     *  - Update loc_rows and loc_cols to accomodate new A size
+     *  - extract Q and R
+     */
 
     /* Start timer*/
     t1 = MPI_Wtime();
