@@ -82,7 +82,7 @@ void constructGv(double* Gv, int proc_cols, int f, int loc_cols) {
     double* V = malloc(f * (proc_cols - f) * sizeof(double));
     randMatrix(V, proc_cols - f, f);
 
-    double* G_pre = malloc(f * proc_cols * sizeof(double));
+    double* G_pre = calloc(f * proc_cols, sizeof(double));
     for (i = 0; i < f; ++i) {
         for (j = 0; j < f; ++j) {
             G_pre[i*proc_cols + j] = 0;
@@ -406,7 +406,7 @@ int main(int argc, char** argv) {
     fp_log = fopen("log.txt", "a");
     
     if (argc != 3) {
-        if (p_rank == MASTER) printf ("Invalid Input, must have arguements: n, f\n");
+        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, must have arguements: n, f\n");
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
     
@@ -419,7 +419,7 @@ int main(int argc, char** argv) {
     proc_cols = proc_rows = (int) sqrt(proc_size);
 
     if (proc_size != proc_cols * proc_rows) {
-        if (p_rank == MASTER) printf ("Invalid Input, np must be a perfect square\n");
+        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, np must be a perfect square\n");
         MPI_Abort(MPI_COMM_WORLD, 3);
     }
     
@@ -429,12 +429,12 @@ int main(int argc, char** argv) {
     check_rows = loc_rows * max_fails;
 
     if (!loc_cols) {
-        if (p_rank == MASTER) printf ("Invalid Input, n^2 must be greater than np\n");
+        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n^2 must be greater than np\n");
         MPI_Abort(MPI_COMM_WORLD, 2);
     }
 
     else if (glob_cols != loc_cols * (proc_cols - max_fails)) {
-        if (p_rank == MASTER) printf ("Invalid Input, n must be divisible by b=sqrt(np)\n");
+        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n must be divisible by b=sqrt(np)\n");
         MPI_Abort(MPI_COMM_WORLD, 4);
     }
 
@@ -456,14 +456,14 @@ int main(int argc, char** argv) {
         }
 
         /* Construct Gv and build checksum under A */
-        Gv = (double*) malloc(glob_cols * check_rows * sizeof(double));
+        Gv = (double*) calloc(glob_cols * check_rows, sizeof(double));
         constructGv(Gv, proc_cols, max_fails, loc_cols);
         matrixMultiply(Gv, A, A + (glob_cols * glob_rows), glob_cols, check_cols, glob_cols, glob_rows);
         //free(Gv);
 
         /* Construct Gh and build AGh and GvAGh checksum in seperate matrix */
-        double* r_checksums = (double*) malloc(check_cols * (glob_rows + check_rows) * sizeof(double));
-        Gh = (double*) malloc(check_cols * glob_rows * sizeof(double));
+        double* r_checksums = (double*) calloc(check_cols * (glob_rows + check_rows), sizeof(double));
+        Gh = (double*) calloc(check_cols * glob_rows, sizeof(double));
         constructGh(Gh, proc_rows, max_fails, loc_rows);
         matrixMultiply(A, Gh, r_checksums, glob_cols, glob_rows, check_cols, glob_rows);
         matrixMultiply(A + (glob_cols * glob_rows), Gh, r_checksums + (check_cols * glob_rows), 
@@ -519,17 +519,16 @@ int main(int argc, char** argv) {
 
     if (p_rank == MASTER) {
 
-        if (glob_cols <= 25) {
-            fprintf(fp_log,"\n");
-            fprintf(fp_log,"Matrix A:\n");
-            printMatrix(A, glob_cols, glob_rows);
 
-            fprintf(fp_log,"Matrix Q:\n");
-            printMatrix(Q, glob_cols, glob_rows);
+        fprintf(fp_log,"\n");
+        fprintf(fp_log,"Matrix A:\n");
+        printMatrix(A, glob_cols + check_cols, glob_rows + check_cols);
 
-            fprintf(fp_log,"Matrix R:\n");
-            printMatrix(R, glob_cols, glob_rows);
-        }
+        fprintf(fp_log,"Matrix Q:\n");
+        printMatrix(Q, glob_cols + check_cols, glob_rows + check_cols);
+
+        fprintf(fp_log,"Matrix R:\n");
+        printMatrix(R, glob_cols + check_cols, glob_rows + check_cols);
     
         // Check error = A - QR (should be near 0)
         // if (glob_cols < 1000 && glob_rows < 1000) {
