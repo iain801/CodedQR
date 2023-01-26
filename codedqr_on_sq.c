@@ -22,7 +22,7 @@
 #define COMP_R 3    /* code for mpi send/recv */
 
 #define DEBUG 0     /* run in debug mode */
-#define SET_SEED 0  /* whether to set srand to 0 */
+#define SET_SEED 1  /* whether to set srand to 0 */
 
 FILE *fp_log;
 
@@ -79,32 +79,32 @@ double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int
 void constructGv(double* Gv, int proc_cols, int f, int loc_cols) {
     int i, j, k;
 
-    double* V = malloc(f * (proc_cols - f) * sizeof(double));
+    double* V = calloc((proc_cols - f) * f, sizeof(double));
     randMatrix(V, proc_cols - f, f);
-
-    double* G_pre = calloc(f * proc_cols, sizeof(double));
+    
+    /* G_pre = [-1/2*VV^T V]*/
+    double* G_pre = calloc(proc_cols * f, sizeof(double));
     for (i = 0; i < f; ++i) {
         for (j = 0; j < f; ++j) {
-            G_pre[i*proc_cols + j] = 0;
             for (k = 0; k < (proc_cols - f); ++k) {
-                G_pre[i*proc_cols + j] -= V[i*f + k] * V[j*f + k] / 2;
+                G_pre[i*proc_cols + j] += -0.5 * V[i*f + k] * V[j*f + k];
             }
         }
-        for (k = f; k < proc_cols; ++k) {
-            G_pre[i*proc_cols + k] = V[i*f + k];
+        for (j = f; j < proc_cols; ++j) {
+            G_pre[i*proc_cols + j] = V[i*(proc_cols - f) + j - f];
         }
     }
 
     free(V);
 
-    int G_cols = loc_cols * proc_cols;
+    int glob_cols = loc_cols * proc_cols;
     int r_off, c_off;
     for (i = 0; i < f; ++i) {
         r_off = i * loc_cols;
         for (j = 0; j < proc_cols; ++j) {
             c_off = j * loc_cols;
             for (k = 0; k < loc_cols; ++k) {
-                Gv[(r_off + k) * G_cols + (c_off + k)] = G_pre[i*proc_cols + j];
+                Gv[(r_off + k) * glob_cols + (c_off + k)] = G_pre[i*proc_cols + j];
             }
         }
     }
@@ -116,14 +116,14 @@ void constructGh(double* Gh, int proc_rows, int f, int loc_rows) {
     double* G_pre = malloc(f * proc_rows * sizeof(double));
     randMatrix(G_pre, proc_rows, f);
     
-    int G_cols = loc_rows * f;
+    int glob_cols = loc_rows * f;
     int r_off, c_off;
     for (i = 0; i < proc_rows; ++i) {
         r_off = i * loc_rows;
         for (j = 0; j < f; ++j) {
             c_off = j * loc_rows;
             for (k = 0; k < loc_rows; ++k) {
-                Gh[(r_off + k) * G_cols + (c_off + k)] = G_pre[i*proc_rows + j];
+                Gh[(r_off + k) * glob_cols + (c_off + k)] = G_pre[i*proc_rows + j];
             }
         }
     }
@@ -423,7 +423,7 @@ int main(int argc, char** argv) {
         MPI_Abort(MPI_COMM_WORLD, 3);
     }
     
-    loc_cols = glob_cols / (proc_cols - max_fails);
+    loc_cols = glob_cols / (proc_cols);
     loc_rows = glob_rows / (proc_rows - max_fails); // To accomidate checksum additions
     check_cols = loc_cols * max_fails;
     check_rows = loc_rows * max_fails;
@@ -433,7 +433,7 @@ int main(int argc, char** argv) {
         MPI_Abort(MPI_COMM_WORLD, 2);
     }
 
-    else if (glob_cols != loc_cols * (proc_cols - max_fails)) {
+    else if (glob_rows != loc_rows * (proc_rows - max_fails)) {
         if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n must be divisible by b=sqrt(np)\n");
         MPI_Abort(MPI_COMM_WORLD, 4);
     }
@@ -442,7 +442,7 @@ int main(int argc, char** argv) {
 
     if (p_rank == MASTER)
     {
-        A = (double*) malloc(glob_cols * (glob_rows + check_rows) * sizeof(double));
+        A = (double*) calloc(glob_cols * (glob_rows + check_rows), sizeof(double));
         fprintf(fp_log,"codedqr_on_sq has started with %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
         fprintf(fp_log,"Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
 
@@ -460,28 +460,29 @@ int main(int argc, char** argv) {
         constructGv(Gv, proc_cols, max_fails, loc_cols);
         matrixMultiply(Gv, A, A + (glob_cols * glob_rows), glob_cols, check_cols, glob_cols, glob_rows);
         //free(Gv);
+        
+        // /* Construct Gh and build AGh and GvAGh checksum in seperate matrix */
+        // double* r_checksums = (double*) calloc(check_cols * (glob_rows + check_rows), sizeof(double));
+        // Gh = (double*) calloc(check_cols * glob_rows, sizeof(double));
+        // constructGh(Gh, proc_rows, max_fails, loc_rows);
+        // matrixMultiply(A, Gh, r_checksums, glob_cols, glob_rows, check_cols, glob_rows);
+        // matrixMultiply(A + (glob_cols * glob_rows), Gh, r_checksums + (check_cols * glob_rows), 
+        //     glob_cols, check_rows, check_cols, glob_rows);
 
-        /* Construct Gh and build AGh and GvAGh checksum in seperate matrix */
-        double* r_checksums = (double*) calloc(check_cols * (glob_rows + check_rows), sizeof(double));
-        Gh = (double*) calloc(check_cols * glob_rows, sizeof(double));
-        constructGh(Gh, proc_rows, max_fails, loc_rows);
-        matrixMultiply(A, Gh, r_checksums, glob_cols, glob_rows, check_cols, glob_rows);
-        matrixMultiply(A + (glob_cols * glob_rows), Gh, r_checksums + (check_cols * glob_rows), 
-            glob_cols, check_rows, check_cols, glob_rows);
-
-        /* Append r_checksums to right of A */
-        double* A_temp = (double*) malloc((glob_cols + check_cols) * (glob_rows + check_rows) * sizeof(double));
-        for (int i = 0; i < glob_rows + check_rows; ++i) {
-            for (int j = 0; j < glob_cols; ++j) {
-                A_temp[i * (glob_cols + check_cols) + j] = A[i * glob_cols + j];
-            }
-            for (int j = 0; j < check_cols; ++j) {
-                A_temp[i * (glob_cols + check_cols) + (glob_cols + j)] = r_checksums[i * check_cols + j];
-            }
-        }
+        // /* Append r_checksums to right of A */
+        // double* A_temp = (double*) malloc((glob_cols + check_cols) * (glob_rows + check_rows) * sizeof(double));
+        // for (int i = 0; i < glob_rows + check_rows; ++i) {
+        //     for (int j = 0; j < glob_cols; ++j) {
+        //         A_temp[i * (glob_cols + check_cols) + j] = A[i * glob_cols + j];
+        //     }
+        //     for (int j = 0; j < check_cols; ++j) {
+        //         A_temp[i * (glob_cols + check_cols) + (glob_cols + j)] = r_checksums[i * check_cols + j];
+        //     }
+        // }
+        
         //free(r_checksums);
         //free(A);
-        A = A_temp;
+        //A = A_temp;
     }
     /* TODO: 
      *  - extract Q and R
@@ -492,7 +493,7 @@ int main(int argc, char** argv) {
 
     /************* Distribute A across process Q *********************/
 
-    Q = (double*) malloc(loc_cols * loc_rows * sizeof(double));
+    Q = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     R = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     
     scatterA(A, Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
@@ -521,25 +522,25 @@ int main(int argc, char** argv) {
 
 
         fprintf(fp_log,"\n");
-        fprintf(fp_log,"Matrix A:\n");
-        printMatrix(A, glob_cols + check_cols, glob_rows + check_cols);
+        fprintf(fp_log,"Matrix A with Checksums:\n");
+        printMatrix(A, glob_cols, glob_rows + check_rows);
 
-        fprintf(fp_log,"Matrix Q:\n");
-        printMatrix(Q, glob_cols + check_cols, glob_rows + check_cols);
+        fprintf(fp_log,"Matrix Q with Checksums:\n");
+        printMatrix(Q, glob_cols, glob_rows + check_rows);
 
         fprintf(fp_log,"Matrix R:\n");
-        printMatrix(R, glob_cols + check_cols, glob_rows + check_cols);
+        printMatrix(R, glob_cols, glob_rows + check_rows);
     
-        // Check error = A - QR (should be near 0)
-        // if (glob_cols < 1000 && glob_rows < 1000) {
-        //     double* B = malloc(glob_cols * glob_rows * sizeof(double));
-        //     double sum = checkError(A, Q, R, B, glob_cols, glob_rows);          
-        //     if (sum > 0 && glob_cols <= 25) {
-        //         fprintf(fp_log,"Matrix B:\n");
-        //         printMatrix(B, glob_cols, glob_rows);
-        //     }
-        //     fprintf(fp_log,"Roundoff Error: %f\n", sum); 
-        // }
+        //Check error = A - QR (should be near 0)
+        if (glob_cols < 1000 && glob_rows < 1000) {
+            double* B = malloc(glob_cols * glob_rows * sizeof(double));
+            double sum = checkError(A, Q, R, B, glob_cols, glob_rows);          
+            if (sum > 0 && glob_cols <= 25) {
+                fprintf(fp_log,"Matrix B:\n");
+                printMatrix(B, glob_cols, glob_rows);
+            }
+            fprintf(fp_log,"Roundoff Error: %f\n", sum); 
+        }
         fprintf(fp_log,"Execution Time: %.3f ms\n", t2);
     }
     
