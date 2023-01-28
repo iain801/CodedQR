@@ -1,0 +1,7 @@
+#!/bin/bash -l
+#SBATCH --ntasks=4
+
+cd $SLURM_SUBMIT_DIR
+
+/bin/hostname
+mpirun -np $SLURM_NTASKS ./codedqr_on_sq 9 1

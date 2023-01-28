@@ -1,0 +1,9 @@
+#!/bin/bash -l
+#SBATCH --ntasks=256
+
+cd $SLURM_SUBMIT_DIR
+
+/bin/hostname
+mpirun -np 64 ./pbmgs_mpi 8000 8000 1000
+mpirun -np 100 ./pbmgs_mpi 8000 8000 800
+mpirun -np 256 ./pbmgs_mpi 8000 8000 500
