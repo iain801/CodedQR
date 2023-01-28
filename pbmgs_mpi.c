@@ -25,14 +25,16 @@
 #define DEBUG 0     /* run in debug mode */
 #define SET_SEED 1  /* whether to set srand to 0 */
 
+FILE *fp_log;
+
 void printMatrix(double* matrix, int n, int m) {
     for (int i = 0; i < m; ++i) {
         for (int j = 0; j < n; ++j) {
-            printf("%.3f ", matrix[i*n + j]);
+            fprintf(fp_log, "%.3f ", matrix[i*n + j]);
         }
-        printf("\n");
+        fprintf(fp_log, "\n");
     }
-    printf("\n");
+    fprintf(fp_log, "\n");
 }
 
 void randMatrix(double* A, int n, int m) {
@@ -103,7 +105,7 @@ void scatterA(double* A, double* Q, int p_rank,
     if(DEBUG) {
         int p_col = p_rank % proc_cols;
         int p_row = p_rank / proc_cols;
-        printf("Q_initial (%d,%d)\n", p_col, p_row);
+        fprintf(fp_log, "Q_initial (%d,%d)\n", p_col, p_row);
         printMatrix(Q, loc_cols, loc_rows);
     }
 }
@@ -203,7 +205,7 @@ void pbmgs(double* Q, double* R, int p_rank,
 
                 /* Set R to Qnorm in the correct row in the correct node */                    
                 if (p_row == (i + j) / loc_rows) {
-                    if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, (i + j) % loc_rows, l);
+                    if(DEBUG) fprintf(fp_log, "Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, (i + j) % loc_rows, l);
                     R[((i + j) % loc_rows)*loc_cols + j] = Qnorm;
                 }     
 
@@ -223,7 +225,7 @@ void pbmgs(double* Q, double* R, int p_rank,
                         MPI_DOUBLE, MPI_SUM, col_comm);
 
                     if(DEBUG) {
-                        printf("Qdot_%d: %.3f\n\n", p_col*loc_cols + l, Qdot);
+                        fprintf(fp_log, "Qdot_%d: %.3f\n\n", p_col*loc_cols + l, Qdot);
                     }
 
                     // Q[:,l] = Q[:,l] - Qdot * Qbar
@@ -233,14 +235,14 @@ void pbmgs(double* Q, double* R, int p_rank,
 
                     /* Set R to Qdot in the correct row in the correct node */                    
                     if (p_row == (i + j) / loc_rows) {
-                        if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qdot, (i + j) % loc_rows, l);
+                        if(DEBUG) fprintf(fp_log, "Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qdot, (i + j) % loc_rows, l);
                         R[((i + j) % loc_rows)*loc_cols + l] = Qdot;
                     }
                 }
             }
 
             if(DEBUG) {
-                printf("Q_reduced (%d,%d)\n", p_col, p_row);
+                fprintf(fp_log, "Q_reduced (%d,%d)\n", p_col, p_row);
                 printMatrix(Q, loc_cols, loc_rows);
             }
 
@@ -250,7 +252,7 @@ void pbmgs(double* Q, double* R, int p_rank,
         }
 
         if(DEBUG && p_col == APC) {
-            printf("Qbar_broadcast (%d,%d)\n", p_col, p_row);
+            fprintf(fp_log, "Qbar_broadcast (%d,%d)\n", p_col, p_row);
             printMatrix(Qbar, loc_cols, loc_rows);
         }
 
@@ -261,7 +263,7 @@ void pbmgs(double* Q, double* R, int p_rank,
         if (p_col > APC) {
             /* Local matrix multiply R = Qbar^T * Q */
             if(DEBUG) {
-                printf("Block (%d,%d) is being transformed at APC=%d\n\n", p_col, p_row, APC);
+                fprintf(fp_log, "Block (%d,%d) is being transformed at APC=%d\n\n", p_col, p_row, APC);
             }
 
             /* j = cols of Q in local block */
@@ -285,7 +287,7 @@ void pbmgs(double* Q, double* R, int p_rank,
                 }
 
                 if(DEBUG) {
-                    printf("R_summed (%d,%d) j=%d\n", p_col, p_row, j);
+                    fprintf(fp_log, "R_summed (%d,%d) j=%d\n", p_col, p_row, j);
                     printMatrix(R, loc_cols, loc_cols);
                 }
 
@@ -307,7 +309,7 @@ void pbmgs(double* Q, double* R, int p_rank,
                 }
 
                 if(DEBUG) {
-                    printf("Q_reduced2 (%d,%d) j=%d\n", p_col, p_row, j);
+                    fprintf(fp_log, "Q_reduced2 (%d,%d) j=%d\n", p_col, p_row, j);
                     printMatrix(R, loc_cols, loc_cols);
                 }
 
@@ -332,9 +334,10 @@ int main(int argc, char** argv) {
     /*********************** Initialize MPI *****************************/
 
     MPI_Init (&argc, &argv);
+    fp_log = fopen("log.txt", "a");
     
     if (argc != 4) {
-        if (p_rank == MASTER) printf ("Invalid Input, must have arguements: m=rows n=cols b=blocksize \n");
+        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, must have arguements: m=rows n=cols b=blocksize \n");
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
     
@@ -343,10 +346,10 @@ int main(int argc, char** argv) {
     block_size = atoi(argv[3]);
 
     if (glob_cols > glob_rows) {
-        if (p_rank == MASTER) printf ("Invalid Input, n cannot be greater than m\n");
+        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n cannot be greater than m\n");
     }
     if (block_size > glob_rows) {
-        if (p_rank == MASTER) printf ("Invalid Input, b cannot be greater than m\n");
+        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, b cannot be greater than m\n");
     }
 
     MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
@@ -364,15 +367,15 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER)
     {
         A = (double*) malloc(glob_rows * glob_cols * sizeof(double));
-        printf("pbmgs_mpi has started with %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
-        printf("Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
+        fprintf(fp_log, "pbmgs_mpi has started with %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
+        fprintf(fp_log, "Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
 
         /* Generate random matrix */
         if(SET_SEED) srand(0);
         else srand(MPI_Wtime());
         randMatrix(A, glob_cols, glob_rows);
         if(DEBUG) {
-            printf("Initializing array A: \n");
+            fprintf(fp_log, "Initializing array A: \n");
             printMatrix(A, glob_cols, glob_rows);
         }
     }
@@ -410,14 +413,14 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER) {
 
         if (glob_rows <= 25) {
-            printf("\n");
-            printf("Matrix A:\n");
+            fprintf(fp_log, "\n");
+            fprintf(fp_log, "Matrix A:\n");
             printMatrix(A, glob_cols, glob_rows);
 
-            printf("Matrix Q:\n");
+            fprintf(fp_log, "Matrix Q:\n");
             printMatrix(Q, glob_cols, glob_cols);
 
-            printf("Matrix R:\n");
+            fprintf(fp_log, "Matrix R:\n");
             printMatrix(R, glob_cols, glob_cols);
         }
     
@@ -426,12 +429,12 @@ int main(int argc, char** argv) {
             double* B = malloc(glob_cols * glob_rows * sizeof(double));
             double sum = checkError(A, Q, R, B, glob_cols, glob_rows);
             if (sum > 0 && glob_rows <= 25) {
-                printf("Matrix B:\n");
+                fprintf(fp_log, "Matrix B:\n");
                 printMatrix(B, glob_cols, glob_rows);
             }
-            printf("Roundoff Error: %f\n", sum);    
+            fprintf(fp_log, "Roundoff Error: %f\n", sum);    
         }
-        printf("Execution Time: %.3f ms\n", t2);
+        fprintf(fp_log, "Execution Time: %.3f ms\n", t2);
     }
 
     MPI_Finalize();
