@@ -76,7 +76,7 @@ double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int
 }
 
 /* Actually Gv for Q-Factor protection, Construction 1 */
-void constructGv(double* Gv, int proc_cols, int f, int loc_cols) {
+void constructGv(double* Gv, int proc_cols, int f, int loc_rows) {
     int i, j, k;
 
     double* V = calloc((proc_cols - f) * f, sizeof(double));
@@ -95,34 +95,42 @@ void constructGv(double* Gv, int proc_cols, int f, int loc_cols) {
         }
     }
 
-    free(V);
-
-    int glob_cols = loc_cols * proc_cols;
+    int glob_cols = loc_rows * proc_cols;
+    int check_cols = loc_rows * f;
     int r_off, c_off;
     for (i = 0; i < f; ++i) {
-        r_off = i * loc_cols;
+        r_off = i * loc_rows;
         for (j = 0; j < proc_cols; ++j) {
-            c_off = j * loc_cols;
-            for (k = 0; k < loc_cols; ++k) {
+            c_off = j * loc_rows;
+            for (k = 0; k < loc_rows; ++k) {
                 Gv[(r_off + k) * glob_cols + (c_off + k)] = G_pre[i*proc_cols + j];
             }
         }
     }
+
+    fprintf(fp_log, "V:\n");
+    printMatrix(V, proc_cols - f, f);
+    fprintf(fp_log, "G_pre:\n");
+    printMatrix(G_pre, proc_cols, f);
+    fprintf(fp_log, "Gv:\n");
+    printMatrix(Gv, glob_cols, loc_rows * f);
+
+    free(V);
 }
 
 /* Actually Gh for R-factor protection, random */
-void constructGh(double* Gh, int proc_rows, int f, int loc_rows) {
+void constructGh(double* Gh, int proc_rows, int f, int loc_cols) {
     int i, j, k;
     double* G_pre = malloc(f * proc_rows * sizeof(double));
     randMatrix(G_pre, proc_rows, f);
     
-    int glob_cols = loc_rows * f;
+    int glob_cols = loc_cols * f;
     int r_off, c_off;
     for (i = 0; i < proc_rows; ++i) {
-        r_off = i * loc_rows;
+        r_off = i * loc_cols;
         for (j = 0; j < f; ++j) {
-            c_off = j * loc_rows;
-            for (k = 0; k < loc_rows; ++k) {
+            c_off = j * loc_cols;
+            for (k = 0; k < loc_cols; ++k) {
                 Gh[(r_off + k) * glob_cols + (c_off + k)] = G_pre[i*proc_rows + j];
             }
         }
@@ -424,19 +432,19 @@ int main(int argc, char** argv) {
     }
     
     loc_cols = glob_cols / (proc_cols);
-    loc_rows = glob_rows / (proc_rows - max_fails); // To accomidate checksum additions
+    loc_rows = glob_rows / proc_rows + max_fails; // To accomidate checksum additions
     check_cols = loc_cols * max_fails;
-    check_rows = loc_rows * max_fails;
+    check_rows = (glob_rows / proc_rows) * max_fails;
 
     if (!loc_cols) {
         if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n^2 must be greater than np\n");
         MPI_Abort(MPI_COMM_WORLD, 2);
     }
 
-    else if (glob_rows != loc_rows * (proc_rows - max_fails)) {
-        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n must be divisible by b=sqrt(np)\n");
-        MPI_Abort(MPI_COMM_WORLD, 4);
-    }
+    // else if (glob_rows != loc_rows * (proc_rows - max_fails)) {
+    //     if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n must be divisible by b=sqrt(np)\n");
+    //     MPI_Abort(MPI_COMM_WORLD, 4);
+    // }
 
     /******************* Initialize arrays ***************************/
 
@@ -460,6 +468,7 @@ int main(int argc, char** argv) {
         constructGv(Gv, proc_cols, max_fails, loc_cols);
         matrixMultiply(Gv, A, A + (glob_cols * glob_rows), glob_cols, check_cols, glob_cols, glob_rows);
         //free(Gv);
+        
         
         // /* Construct Gh and build AGh and GvAGh checksum in seperate matrix */
         // double* r_checksums = (double*) calloc(check_cols * (glob_rows + check_rows), sizeof(double));
@@ -525,11 +534,14 @@ int main(int argc, char** argv) {
         fprintf(fp_log,"Matrix A with Checksums:\n");
         printMatrix(A, glob_cols, glob_rows + check_rows);
 
-        fprintf(fp_log,"Matrix Q with Checksums:\n");
-        printMatrix(Q, glob_cols, glob_rows + check_rows);
+        fprintf(fp_log,"Matrix Q1:\n");
+        printMatrix(Q, glob_cols, glob_rows);
+
+        fprintf(fp_log,"Matrix Q2:\n");
+        printMatrix(Q + (glob_cols * glob_rows), glob_cols, check_rows);
 
         fprintf(fp_log,"Matrix R:\n");
-        printMatrix(R, glob_cols, glob_rows + check_rows);
+        printMatrix(R, glob_cols, glob_rows);
     
         //Check error = A - QR (should be near 0)
         if (glob_cols < 1000 && glob_rows < 1000) {
