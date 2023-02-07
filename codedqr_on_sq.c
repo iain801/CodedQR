@@ -76,65 +76,41 @@ double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int
 }
 
 /* Actually Gv for Q-Factor protection, Construction 1 */
-void constructGv(double* Gv, int proc_cols, int f, int loc_rows) {
+void constructGv(double* Gv, int proc_cols, int f) {
     int i, j, k;
 
+    int p_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);  
+
     double* V = calloc((proc_cols - f) * f, sizeof(double));
-    randMatrix(V, proc_cols - f, f);
+    if (p_rank == MASTER)
+        randMatrix(V, proc_cols - f, f);
+    MPI_Bcast(V, (proc_cols - f) * f, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
     
     /* G_pre = [-1/2*VV^T V]*/
-    double* G_pre = calloc(proc_cols * f, sizeof(double));
     for (i = 0; i < f; ++i) {
         for (j = 0; j < f; ++j) {
             for (k = 0; k < (proc_cols - f); ++k) {
-                G_pre[i*proc_cols + j] += -0.5 * V[i*f + k] * V[j*f + k];
+                Gv[i*proc_cols + j] += -0.5 * V[i*f + k] * V[j*f + k];
             }
         }
         for (j = f; j < proc_cols; ++j) {
-            G_pre[i*proc_cols + j] = V[i*(proc_cols - f) + j - f];
+            Gv[i*proc_cols + j] = V[i*(proc_cols - f) + j - f];
         }
     }
-
-    int glob_cols = loc_rows * proc_cols;
-    int check_cols = loc_rows * f;
-    int r_off, c_off;
-    for (i = 0; i < f; ++i) {
-        r_off = i * loc_rows;
-        for (j = 0; j < proc_cols; ++j) {
-            c_off = j * loc_rows;
-            for (k = 0; k < loc_rows; ++k) {
-                Gv[(r_off + k) * glob_cols + (c_off + k)] = G_pre[i*proc_cols + j];
-            }
-        }
+    if (DEBUG) {
+        fprintf(fp_log, "V:\n");
+        printMatrix(V, proc_cols - f, f);
+        fprintf(fp_log, "G_pre:\n");
+        printMatrix(Gv, proc_cols, f);
     }
-
-    fprintf(fp_log, "V:\n");
-    printMatrix(V, proc_cols - f, f);
-    fprintf(fp_log, "G_pre:\n");
-    printMatrix(G_pre, proc_cols, f);
-    fprintf(fp_log, "Gv:\n");
-    printMatrix(Gv, glob_cols, loc_rows * f);
 
     free(V);
 }
 
 /* Actually Gh for R-factor protection, random */
-void constructGh(double* Gh, int proc_rows, int f, int loc_cols) {
-    int i, j, k;
-    double* G_pre = malloc(f * proc_rows * sizeof(double));
-    randMatrix(G_pre, proc_rows, f);
-    
-    int glob_cols = loc_cols * f;
-    int r_off, c_off;
-    for (i = 0; i < proc_rows; ++i) {
-        r_off = i * loc_cols;
-        for (j = 0; j < f; ++j) {
-            c_off = j * loc_cols;
-            for (k = 0; k < loc_cols; ++k) {
-                Gh[(r_off + k) * glob_cols + (c_off + k)] = G_pre[i*proc_rows + j];
-            }
-        }
-    }
+void constructGh(double* Gh, int proc_rows, int f) {
+    randMatrix(Gh, proc_rows, f);
 }
 
 void scatterA(double* A, double* Q, int p_rank, 
@@ -404,7 +380,8 @@ int main(int argc, char** argv) {
         max_fails,              /* maximum tolerable failiures (f in literature) */
         check_cols, check_rows; /* checksum rows/columns */
     double  *A, *Q, *R,         /* main i/o matrices */
-            *Gv, *Gh;           /* checksum generator matrices */
+            *Gv_tilde,          /* Q Factor generator matrix */
+            *Gh_tilde;          /* R Factor generator matrix */
 
     double t1, t2;              /* timer */
 
@@ -412,22 +389,43 @@ int main(int argc, char** argv) {
 
     MPI_Init (&argc, &argv);
     fp_log = fopen("log.txt", "a");
-    
+
+    MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);  
+
+    /*
     if (argc != 3) {
         if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, must have arguements: n, f\n");
+        fclose(fp_log);
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
     
     glob_cols = glob_rows = atoi(argv[1]);
     max_fails = atoi(argv[2]);
+    */
 
-    MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);    
+    if (proc_size != 6) {
+        if (p_rank == MASTER) fprintf(fp_log, "Must use 6 processors\n");
+        fclose(fp_log);
+        MPI_Abort(MPI_COMM_WORLD, 5);
+    }
 
+    
+    proc_cols = 2;
+    proc_rows = 3;
+    max_fails = 1;
+
+    glob_cols = glob_rows = 4;
+    loc_cols = loc_rows = 2;
+    check_cols = 0;
+    check_rows = loc_rows * max_fails;
+
+    /*
     proc_cols = proc_rows = (int) sqrt(proc_size);
 
     if (proc_size != proc_cols * proc_rows) {
         if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, np must be a perfect square\n");
+        fclose(fp_log);
         MPI_Abort(MPI_COMM_WORLD, 3);
     }
     
@@ -435,16 +433,19 @@ int main(int argc, char** argv) {
     loc_rows = glob_rows / proc_rows + max_fails; // To accomidate checksum additions
     check_cols = loc_cols * max_fails;
     check_rows = (glob_rows / proc_rows) * max_fails;
-
+    
     if (!loc_cols) {
         if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n^2 must be greater than np\n");
+        fclose(fp_log);
         MPI_Abort(MPI_COMM_WORLD, 2);
     }
 
-    // else if (glob_rows != loc_rows * (proc_rows - max_fails)) {
-    //     if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n must be divisible by b=sqrt(np)\n");
-    //     MPI_Abort(MPI_COMM_WORLD, 4);
-    // }
+    else if (glob_rows != loc_rows * (proc_rows - max_fails)) {
+        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n must be divisible by b=sqrt(np)\n");
+        fclose(fp_log);
+        MPI_Abort(MPI_COMM_WORLD, 4);
+    }
+    */
 
     /******************* Initialize arrays ***************************/
 
@@ -462,13 +463,6 @@ int main(int argc, char** argv) {
             fprintf(fp_log,"Initializing array A: \n");
             printMatrix(A, glob_cols, glob_rows);
         }
-
-        /* Construct Gv and build checksum under A */
-        Gv = (double*) calloc(glob_cols * check_rows, sizeof(double));
-        constructGv(Gv, proc_cols, max_fails, loc_cols);
-        matrixMultiply(Gv, A, A + (glob_cols * glob_rows), glob_cols, check_cols, glob_cols, glob_rows);
-        //free(Gv);
-        
         
         // /* Construct Gh and build AGh and GvAGh checksum in seperate matrix */
         // double* r_checksums = (double*) calloc(check_cols * (glob_rows + check_rows), sizeof(double));
@@ -494,11 +488,12 @@ int main(int argc, char** argv) {
         //A = A_temp;
     }
     /* TODO: 
+     *  - Generate V and broadcast
+     *  - Each checksum node uses one row of G_pre times column of A nodes
+     *  - calculate grid -> distribute A -> calculate checksums.
      *  - extract Q and R
+     *  - Test failiure and reconstruction
      */
-
-    /* Start timer*/
-    t1 = MPI_Wtime();
 
     /************* Distribute A across process Q *********************/
 
@@ -506,19 +501,54 @@ int main(int argc, char** argv) {
     R = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     
     scatterA(A, Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+    
+    /* Start timer*/
+    t1 = MPI_Wtime();
+    /***************** Q-Factor Checksums ****************************/
+    
+    int i, j;
 
+    /* Construct Gv for all nodes */
+    Gv_tilde = (double*) calloc(proc_cols * max_fails, sizeof(double));
+    constructGv(Gv_tilde, proc_cols, max_fails);
+
+    MPI_Comm row_comm, col_comm;
+    int p_col = p_rank % proc_cols;
+    int p_row = p_rank / proc_cols;
+    int cs_row = p_row - proc_rows + max_fails;
+    int cs_col = p_col - proc_cols;// + max_fails;
+
+    MPI_Comm_split(MPI_COMM_WORLD, p_col, p_rank, &col_comm);
+    MPI_Comm_split(MPI_COMM_WORLD, p_row, p_rank, &row_comm);
+
+    double* part_checksum = (double*) calloc(loc_cols * loc_rows, sizeof(double));
+
+    if (cs_row < 0) { //if non-checksum node
+        for (j=0; j < max_fails; ++j) {
+            for (i=0; i < loc_cols * loc_rows; ++i) {
+                part_checksum[i] = Gv_tilde[j * proc_cols + p_row] * Q[i];
+            }
+            MPI_Reduce(part_checksum, NULL, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, j + proc_rows - max_fails, col_comm);
+        }
+    }
+    else { //reduce checksums to checksum nodes
+        for (j=0; j < max_fails; ++j) {
+            MPI_Reduce(part_checksum, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, j + proc_rows - max_fails, col_comm);
+        }
+    }
+    
     /************************ PBMGS **********************************/
-
+    
     pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+
+    /* End timer */
+    t2 = MPI_Wtime() - t1;
 
     /*********** Compile Q and R from local blocks *******************/
 
     gatherQR(&Q, &R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
 
     /********************* Check Results *****************************/
-
-    /* End timer */
-    t2 = MPI_Wtime() - t1;
 
     /* Take average execution time */
     {
@@ -531,8 +561,8 @@ int main(int argc, char** argv) {
 
 
         fprintf(fp_log,"\n");
-        fprintf(fp_log,"Matrix A with Checksums:\n");
-        printMatrix(A, glob_cols, glob_rows + check_rows);
+        fprintf(fp_log,"Matrix A:\n");
+        printMatrix(A, glob_cols, glob_rows);
 
         fprintf(fp_log,"Matrix Q1:\n");
         printMatrix(Q, glob_cols, glob_rows);
