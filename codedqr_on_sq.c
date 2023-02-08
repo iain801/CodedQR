@@ -26,10 +26,10 @@
 
 FILE *fp_log;
 
-void printMatrix(double* matrix, int n, int m) {
-    for (int i = 0; i < m; ++i) {
-        for (int j = 0; j < n; ++j) {
-            fprintf(fp_log,"%.3f ", matrix[i*n + j]);
+void printMatrix(double* matrix, int cols, int rows) {
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            fprintf(fp_log,"%.3f ", matrix[i*cols + j]);
         }
         fprintf(fp_log,"\n");
     }
@@ -76,41 +76,39 @@ double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int
 }
 
 /* Actually Gv for Q-Factor protection, Construction 1 */
-void constructGv(double* Gv, int proc_cols, int f) {
+void constructGv(double* Gv, int proc_rows, int f) {
     int i, j, k;
 
     int p_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);  
 
-    double* V = calloc((proc_cols - f) * f, sizeof(double));
-    if (p_rank == MASTER)
-        randMatrix(V, proc_cols - f, f);
-    MPI_Bcast(V, (proc_cols - f) * f, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
+    double* V = calloc(((proc_rows - f) - f) * f, sizeof(double));
+    randMatrix(V, (proc_rows - f) - f, f);
     
     /* G_pre = [-1/2*VV^T V]*/
     for (i = 0; i < f; ++i) {
         for (j = 0; j < f; ++j) {
-            for (k = 0; k < (proc_cols - f); ++k) {
-                Gv[i*proc_cols + j] += -0.5 * V[i*f + k] * V[j*f + k];
+            for (k = 0; k < ((proc_rows - f) - f); ++k) {
+                Gv[i*(proc_rows - f) + j] += -0.5 * V[i*f + k] * V[j*f + k];
             }
         }
-        for (j = f; j < proc_cols; ++j) {
-            Gv[i*proc_cols + j] = V[i*(proc_cols - f) + j - f];
+        for (j = f; j < (proc_rows - f); ++j) {
+            Gv[i*(proc_rows - f) + j] = V[i*((proc_rows - f) - f) + j - f];
         }
     }
     if (DEBUG) {
         fprintf(fp_log, "V:\n");
-        printMatrix(V, proc_cols - f, f);
+        printMatrix(V, (proc_rows - f) - f, f);
         fprintf(fp_log, "G_pre:\n");
-        printMatrix(Gv, proc_cols, f);
+        printMatrix(Gv, (proc_rows - f), f);
     }
 
     free(V);
 }
 
 /* Actually Gh for R-factor protection, random */
-void constructGh(double* Gh, int proc_rows, int f) {
-    randMatrix(Gh, proc_rows, f);
+void constructGh(double* Gh, int proc_cols, int f) {
+    randMatrix(Gh, proc_cols-f, f);
 }
 
 void scatterA(double* A, double* Q, int p_rank, 
@@ -404,7 +402,7 @@ int main(int argc, char** argv) {
     max_fails = atoi(argv[2]);
     */
 
-    if (proc_size != 6) {
+    if (proc_size % 2 != 0) {
         if (p_rank == MASTER) fprintf(fp_log, "Must use 6 processors\n");
         fclose(fp_log);
         MPI_Abort(MPI_COMM_WORLD, 5);
@@ -412,8 +410,8 @@ int main(int argc, char** argv) {
 
     
     proc_cols = 2;
-    proc_rows = 3;
-    max_fails = 1;
+    proc_rows = proc_size / 2;
+    max_fails = proc_rows - proc_cols;
 
     glob_cols = glob_rows = 4;
     loc_cols = loc_rows = 2;
@@ -504,18 +502,23 @@ int main(int argc, char** argv) {
     
     /* Start timer*/
     t1 = MPI_Wtime();
+
     /***************** Q-Factor Checksums ****************************/
     
     int i, j;
+    Gv_tilde = (double*) calloc((proc_rows - max_fails) * max_fails, sizeof(double));
 
-    /* Construct Gv for all nodes */
-    Gv_tilde = (double*) calloc(proc_cols * max_fails, sizeof(double));
-    constructGv(Gv_tilde, proc_cols, max_fails);
+    /* Construct Gv in master node */
+    if (p_rank == MASTER)
+        constructGv(Gv_tilde, proc_rows, max_fails);
+
+    /* Broadcast Gv from master node */
+    MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
 
     MPI_Comm row_comm, col_comm;
     int p_col = p_rank % proc_cols;
     int p_row = p_rank / proc_cols;
-    int cs_row = p_row - proc_rows + max_fails;
+    int cs_row = p_row - (proc_rows - max_fails);
     int cs_col = p_col - proc_cols;// + max_fails;
 
     MPI_Comm_split(MPI_COMM_WORLD, p_col, p_rank, &col_comm);
@@ -526,7 +529,7 @@ int main(int argc, char** argv) {
     if (cs_row < 0) { //if non-checksum node
         for (j=0; j < max_fails; ++j) {
             for (i=0; i < loc_cols * loc_rows; ++i) {
-                part_checksum[i] = Gv_tilde[j * proc_cols + p_row] * Q[i];
+                part_checksum[i] = Gv_tilde[j * (proc_rows - max_fails) + p_row] * Q[i];
             }
             MPI_Reduce(part_checksum, NULL, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, j + proc_rows - max_fails, col_comm);
         }
@@ -534,12 +537,18 @@ int main(int argc, char** argv) {
     else { //reduce checksums to checksum nodes
         for (j=0; j < max_fails; ++j) {
             MPI_Reduce(part_checksum, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, j + proc_rows - max_fails, col_comm);
+            if (DEBUG && j==cs_row) {
+                fprintf(fp_log, "Checkum node %d Q is now:\n", p_rank);
+                printMatrix(Q, loc_cols, loc_rows);
+            }
         }
     }
     
     /************************ PBMGS **********************************/
     
     pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+
+    /***************** Q-Factor Checksums ****************************/
 
     /* End timer */
     t2 = MPI_Wtime() - t1;
@@ -559,25 +568,26 @@ int main(int argc, char** argv) {
 
     if (p_rank == MASTER) {
 
+        if (glob_cols < 100 && glob_rows < 100) {
+            fprintf(fp_log,"\n");
+            fprintf(fp_log,"Matrix A:\n");
+            printMatrix(A, glob_cols, glob_rows);
 
-        fprintf(fp_log,"\n");
-        fprintf(fp_log,"Matrix A:\n");
-        printMatrix(A, glob_cols, glob_rows);
+            fprintf(fp_log,"Matrix Q1:\n");
+            printMatrix(Q, glob_cols, glob_rows);
 
-        fprintf(fp_log,"Matrix Q1:\n");
-        printMatrix(Q, glob_cols, glob_rows);
+            fprintf(fp_log,"Matrix Q2:\n");
+            printMatrix(Q + (glob_cols * glob_rows), glob_cols, check_rows);
 
-        fprintf(fp_log,"Matrix Q2:\n");
-        printMatrix(Q + (glob_cols * glob_rows), glob_cols, check_rows);
-
-        fprintf(fp_log,"Matrix R:\n");
-        printMatrix(R, glob_cols, glob_rows);
+            fprintf(fp_log,"Matrix R:\n");
+            printMatrix(R, glob_cols, glob_rows);
+        }
     
         //Check error = A - QR (should be near 0)
         if (glob_cols < 1000 && glob_rows < 1000) {
             double* B = malloc(glob_cols * glob_rows * sizeof(double));
             double sum = checkError(A, Q, R, B, glob_cols, glob_rows);          
-            if (sum > 0 && glob_cols <= 25) {
+            if (sum > 0 && glob_cols < 100 && glob_rows < 100) {
                 fprintf(fp_log,"Matrix B:\n");
                 printMatrix(B, glob_cols, glob_rows);
             }
@@ -585,7 +595,8 @@ int main(int argc, char** argv) {
         }
         fprintf(fp_log,"Execution Time: %.3f ms\n", t2);
     }
-    
+
+    fprintf(fp_log,"\n\n");
     fclose(fp_log);
     MPI_Finalize();
 }
