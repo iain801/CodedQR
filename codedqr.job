@@ -1,8 +1,8 @@
 #!/bin/bash -l
-#SBATCH -N 1 --ntasks-per-node=6
+#SBATCH -N 1 --ntasks-per-node=20
 
 cd $SLURM_SUBMIT_DIR
 
 /bin/hostname
 mpicc codedqr_on_sq.c -o codedqr_on_sq -lm
-mpirun -np $SLURM_NTASKS ./codedqr_on_sq
+mpirun -np 20 ./codedqr_on_sq
