@@ -10,9 +10,14 @@
  * Iain Weissburg 2023
  */
 
+#define MKL_INT int
+#define MKL_DOUBLE double
+#define cblas_d double
+
 #include <stdlib.h>
 #include <math.h>
 #include <mpi.h>
+#include <mkl.h>
 #include <time.h>
 #include <stdio.h>
 
@@ -22,7 +27,7 @@
 #define COMP_R 3    /* code for mpi send/recv */
 
 #define DEBUG 0     /* run in debug mode */
-#define SET_SEED 0  /* whether to set srand to 0 */
+#define SET_SEED 1  /* whether to set srand to 0 */
 
 FILE *fp_log;
 
@@ -48,25 +53,12 @@ void randMatrix(double* A, int n, int m) {
     }
 }
 
-/* sets C = AB 
-    a_cols must equal b_rows 
-    C will be b_cols * a_rows */
-void matrixMultiply(double* A, double* B, double* C, int a_cols, int a_rows, int b_cols, int b_rows) {
-    int i, j, k;
-    for (i = 0; i < a_rows; ++i) {
-        for (j = 0; j < b_cols; ++j) {
-            C[i*b_cols + j] = 0;
-            for (k = 0; k < a_cols; ++k) {
-                C[i*b_cols + j] += A[i*a_cols + k] * B[k*b_cols + j];
-            }
-        }
-    }
-}
-
 /* sets B = QR and returns 1-norm of A - B */
 double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int glob_rows) {
     double sum = 0;
-    matrixMultiply(Q, R, B, glob_cols, glob_rows, glob_cols, glob_rows);
+    LAPACKE_dlacpy(CblasRowMajor,'A', glob_rows, glob_cols, Q, glob_cols, B, glob_cols);
+    cblas_dtrmm(CblasRowMajor, CblasRight, CblasUpper, CblasNoTrans, CblasNonUnit,
+                    glob_rows, glob_cols, 1, R, glob_cols, B, glob_cols);
 
     for (int i = 0; i < glob_rows * glob_cols; ++i) {
         sum += fabs(B[i] - A[i]);
@@ -191,6 +183,10 @@ void constructGv(double* Gv, int proc_rows, int f) {
                 Gv[i*(proc_rows - f) + j] += -0.5 * V[i*f + k] * V[j*f + k];
             }
         }
+        /* Using BLAS for Gv proved much slower */
+        // cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, f, f, proc_rows - 2*f, 
+        //     -0.5, V, proc_rows - 2*f, V, proc_rows - 2*f, 0, Gv, proc_rows - f);
+        
         for (j = f; j < (proc_rows - f); ++j) {
             Gv[i*(proc_rows - f) + j] = V[i*((proc_rows - f) - f) + j - f];
         }
@@ -248,7 +244,6 @@ void reconstructQ(double* Q, double* Gv_tilde, int target_row, int p_rank, int p
 
         if (p_row != target_row) { //if not target
             if (p_row < proc_rows - max_fails) { //if regular node
-
                 for (i=0; i < loc_cols * loc_rows; ++i) {
                     part_recon[i] = -1 * Gv_tilde[checksum_row * (proc_rows - max_fails) + p_row] * Q[i];
                 }
@@ -275,7 +270,7 @@ void pbmgs(double* Q, double* R, int p_rank,
     int proc_cols, int proc_rows, int loc_cols, int loc_rows) {
 
     int APC,                        /* active process column */
-        i, j, k, l;                 /* iterators */
+        i, j, k;                    /* iterators */
     double  Qnorm, Qdot,            /* operation variables */
             Qnorm_loc, Qdot_loc;    /* operation local matrices */
 
@@ -296,12 +291,9 @@ void pbmgs(double* Q, double* R, int p_rank,
         /* ICGS Step */
         if (p_col == APC) {
             for (j = 0; j < loc_cols; ++j) {
-                Qnorm_loc = 0;
                 Qnorm = 0;
 
-                for (k = 0; k < loc_rows; ++k) {
-                    Qnorm_loc += Q[k*loc_cols + j] * Q[k*loc_cols + j];
-                }
+                Qnorm_loc = cblas_ddot(loc_rows, Q + j, loc_cols, Q + j, loc_cols);
             
                 /* Allreduce to find squared sum of Qbar */
                 MPI_Allreduce(&Qnorm_loc, &Qnorm, 1, MPI_DOUBLE,
@@ -311,43 +303,38 @@ void pbmgs(double* Q, double* R, int p_rank,
                 Qnorm = sqrt(Qnorm);
 
                 /* Normalize local portions of Qbar */
-                for (k = 0; k < loc_rows; ++k)
-                    Q[k*loc_cols + j] /= Qnorm;
+                cblas_dscal(loc_rows, 1 / Qnorm, Q + j, loc_cols);
 
                 /* Set R to Qnorm in the correct row in the correct node */                    
                 if (p_row == (i + j) / loc_rows) {
-                    if(DEBUG) fprintf(fp_log,"Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, (i + j) % loc_rows, l);
+                    if(DEBUG) fprintf(fp_log,"Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, (i + j) % loc_rows, k);
                     R[((i + j) % loc_rows)*loc_cols + j] = Qnorm;
                 }     
 
                 // For upper triangular R[j, j+1:n]
-                for (l = j+1; l < loc_cols; ++l) {
+                for (k = j+1; k < loc_cols; ++k) {
 
-                    Qdot_loc = 0;
                     Qdot = 0;
 
-                    /* Perform local parts of Qbar * Q[:,l]*/
-                    for (k = 0; k < loc_rows; ++k) {
-                        Qdot_loc += Q[k*loc_cols + l] * Q[k*loc_cols + j];
-                    }
+                    /* Perform local parts of Qbar * Q[:,k]*/
+                    Qdot_loc = cblas_ddot(loc_rows, Q + k, loc_cols, Q + j, loc_cols);
 
-                    /* Reduce to form Qdot = Qbar * Q[:,l] */
+                    /* Reduce to form Qdot = Qbar * Q[:,k] */
                     MPI_Allreduce(&Qdot_loc, &Qdot, 1, 
                         MPI_DOUBLE, MPI_SUM, col_comm);
 
                     if(DEBUG) {
-                        fprintf(fp_log,"Qdot_%d: %.3f\n\n", p_col*loc_cols + l, Qdot);
+                        fprintf(fp_log,"Qdot_%d: %.3f\n\n", p_col*loc_cols + k, Qdot);
                     }
 
-                    // Q[:,l] = Q[:,l] - Qdot * Qbar
-                    for (k = 0; k < loc_rows; ++k) {
-                        Q[k*loc_cols + l] -= Qdot * Q[k*loc_cols + j];
-                    }
+                    // Q[:,k] = Q[:,k] - Qdot * Qbar
+                    cblas_daxpy(loc_rows, -1 * Qdot, Q + j, loc_cols, Q + k, loc_cols);
+
 
                     /* Set R to Qdot in the correct row in the correct node */                    
                     if (p_row == (i + j) / loc_rows) {
-                        if(DEBUG) fprintf(fp_log,"Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qdot, (i + j) % loc_rows, l);
-                        R[((i + j) % loc_rows)*loc_cols + l] = Qdot;
+                        if(DEBUG) fprintf(fp_log,"Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qdot, (i + j) % loc_rows, k);
+                        R[((i + j) % loc_rows)*loc_cols + k] = Qdot;
                     }
                 }
             }
@@ -358,8 +345,7 @@ void pbmgs(double* Q, double* R, int p_rank,
             }
 
             /* Copy Q into Qbar for broadcast */
-            for (j = 0; j < loc_cols * loc_rows; ++j)
-                Qbar[j] = Q[j];
+            LAPACKE_dlacpy(CblasRowMajor, 'A', loc_cols, loc_rows, Q, loc_cols, Qbar, loc_cols);
         }
 
         if(DEBUG && p_col == APC) {
@@ -384,11 +370,7 @@ void pbmgs(double* Q, double* R, int p_rank,
                 for (k = 0; k < loc_cols; ++k) {
 
                     /* R[j,k] = Q[:,j] * Qbar[:,k]*/
-                    Qdot_loc = 0;
-                    /* l = all rows in block */
-                    for (l = 0; l < loc_rows; ++l) {
-                        Qdot_loc += Q[l*loc_cols + j] * Qbar[l*loc_cols + k];
-                    }
+                    Qdot_loc = cblas_ddot(loc_rows, Q + j, loc_cols, Qbar + k, loc_cols);
 
                     /* Column wise All-reduce*/
                     MPI_Allreduce(&Qdot_loc, &Qdot, 1, 
@@ -406,17 +388,13 @@ void pbmgs(double* Q, double* R, int p_rank,
                 for (k = 0; k < loc_cols; ++k) {
 
                     /*  Q[:,j] reduced by Q[:,i] * R[i,j] */
-                    for (l = 0; l < loc_rows; ++l) {
-                        Q[l*loc_cols + j] -= Rbar[k*loc_cols + j] * Qbar[l*loc_cols + k];
-                    }
+                    cblas_daxpy(loc_rows, -1 * Rbar[k*loc_cols + j], Qbar + k, loc_cols, Q + j, loc_cols);
 
                     /* Set R in the correct row in the correct node */                    
-                    if (p_row == (i + k) / loc_rows)
-                    {
+                    if (p_row == (i + k) / loc_rows) {
                         R[((i + k) % loc_rows)*loc_cols + j] 
                             = Rbar[k*loc_cols + j];
                     }
-
                 }
 
                 if(DEBUG) {
@@ -476,8 +454,8 @@ int main(int argc, char** argv) {
     proc_rows = proc_size / 4;
     max_fails = proc_rows - proc_cols;
 
-    glob_cols = glob_rows = 8;
-    loc_cols = loc_rows = 2;
+    glob_cols = glob_rows = atoi(argv[1]);
+    loc_cols = loc_rows = atoi(argv[2]);
     check_cols = 0;
     check_rows = loc_rows * max_fails;
 
@@ -495,6 +473,7 @@ int main(int argc, char** argv) {
     check_cols = loc_cols * max_fails;
     check_rows = (glob_rows / proc_rows) * max_fails;
     
+    /*
     if (!loc_cols) {
         if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n^2 must be greater than np\n");
         fclose(fp_log);
@@ -614,7 +593,7 @@ int main(int argc, char** argv) {
     {
     double exec_time;
     MPI_Reduce(&t2, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, MPI_COMM_WORLD);
-    if (p_rank == MASTER) t2 = 1000 * exec_time / proc_size;
+    t2 = 1000 * exec_time / proc_size;
     }
 
     if (p_rank == MASTER) {
