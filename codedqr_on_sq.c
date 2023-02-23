@@ -30,6 +30,7 @@
 #define SET_SEED 1  /* whether to set srand to 0 */
 
 FILE *fp_log;
+VSLStreamStatePtr stream;
 
 void printMatrix(double* matrix, int cols, int rows) {
     for (int i = 0; i < rows; ++i) {
@@ -41,30 +42,18 @@ void printMatrix(double* matrix, int cols, int rows) {
     fprintf(fp_log,"\n");
 }
 
-/* uniform random in range [rangeLow, rangeHigh] */
-double uniform(int rangeLow, int rangeHigh) {
-    return ((double)rand()/(double)RAND_MAX) * (rangeHigh - rangeLow) + rangeLow;
-}
-
+/* Fill Matrix with standard normal randoms */
 void randMatrix(double* A, int n, int m) {
-    int size = n * m;
-    for (int i = 0; i < size; ++i) {
-        A[i] = uniform(0,1);
-    }
+    vdRngGaussian( VSL_RNG_METHOD_GAUSSIAN_BOXMULLER, stream, n*m, A, 0, 1 );
 }
 
 /* sets B = QR and returns 1-norm of A - B */
 double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int glob_rows) {
-    double sum = 0;
     LAPACKE_dlacpy(CblasRowMajor,'A', glob_rows, glob_cols, Q, glob_cols, B, glob_cols);
     cblas_dtrmm(CblasRowMajor, CblasRight, CblasUpper, CblasNoTrans, CblasNonUnit,
                     glob_rows, glob_cols, 1, R, glob_cols, B, glob_cols);
-
-    for (int i = 0; i < glob_rows * glob_cols; ++i) {
-        sum += fabs(B[i] - A[i]);
-    }
-
-    return sum;
+    cblas_daxpy(glob_cols*glob_rows, -1, A, 1, B, 1);
+    return cblas_dnrm2(glob_cols*glob_rows, B, 1);
 }
 
 void scatterA(double* A, double* Q, int p_rank, 
@@ -132,7 +121,7 @@ void gatherQR(double** Q, double** R, int p_rank,
 
                 /* If target not master, recieve Q and R */
                 int target = j * proc_cols + i;
-                if (target != p_rank) {
+                if (target != MASTER) {
                     MPI_Recv(*Q, loc_cols * loc_rows, MPI_DOUBLE,
                         target, COMP_Q, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                     MPI_Recv(*R, loc_cols * loc_rows, MPI_DOUBLE,
@@ -178,14 +167,9 @@ void constructGv(double* Gv, int proc_rows, int f) {
     
     /* G_pre = [-1/2*VV^T V]*/
     for (i = 0; i < f; ++i) {
-        for (j = 0; j < f; ++j) {
-            for (k = 0; k < ((proc_rows - f) - f); ++k) {
-                Gv[i*(proc_rows - f) + j] += -0.5 * V[i*f + k] * V[j*f + k];
-            }
-        }
-        /* Using BLAS for Gv proved much slower */
-        // cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, f, f, proc_rows - 2*f, 
-        //     -0.5, V, proc_rows - 2*f, V, proc_rows - 2*f, 0, Gv, proc_rows - f);
+
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, f, f, proc_rows - 2*f, 
+            -0.5, V, proc_rows - 2*f, V, proc_rows - 2*f, 0, Gv, proc_rows - f);
         
         for (j = f; j < (proc_rows - f); ++j) {
             Gv[i*(proc_rows - f) + j] = V[i*((proc_rows - f) - f) + j - f];
@@ -432,24 +416,6 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);  
 
-    /*
-    if (argc != 3) {
-        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, must have arguements: n, f\n");
-        fclose(fp_log);
-        MPI_Abort(MPI_COMM_WORLD, 1);
-    }
-    
-    glob_cols = glob_rows = atoi(argv[1]);
-    max_fails = atoi(argv[2]);
-    */
-
-    if (proc_size % 4 != 0) {
-        if (p_rank == MASTER) fprintf(fp_log, "Must use 6 processors\n");
-        fclose(fp_log);
-        MPI_Abort(MPI_COMM_WORLD, 5);
-    }
-
-    
     proc_cols = 4;
     proc_rows = proc_size / 4;
     max_fails = proc_rows - proc_cols;
@@ -458,34 +424,6 @@ int main(int argc, char** argv) {
     loc_cols = loc_rows = atoi(argv[2]);
     check_cols = 0;
     check_rows = loc_rows * max_fails;
-
-    /*
-    proc_cols = proc_rows = (int) sqrt(proc_size);
-
-    if (proc_size != proc_cols * proc_rows) {
-        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, np must be a perfect square\n");
-        fclose(fp_log);
-        MPI_Abort(MPI_COMM_WORLD, 3);
-    }
-    
-    loc_cols = glob_cols / (proc_cols);
-    loc_rows = glob_rows / proc_rows + max_fails; // To accomidate checksum additions
-    check_cols = loc_cols * max_fails;
-    check_rows = (glob_rows / proc_rows) * max_fails;
-    
-    /*
-    if (!loc_cols) {
-        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n^2 must be greater than np\n");
-        fclose(fp_log);
-        MPI_Abort(MPI_COMM_WORLD, 2);
-    }
-
-    else if (glob_rows != loc_rows * (proc_rows - max_fails)) {
-        if (p_rank == MASTER) fprintf(fp_log, "Invalid Input, n must be divisible by b=sqrt(np)\n");
-        fclose(fp_log);
-        MPI_Abort(MPI_COMM_WORLD, 4);
-    }
-    */
 
     /******************* Initialize arrays ***************************/
 
@@ -496,8 +434,8 @@ int main(int argc, char** argv) {
         fprintf(fp_log,"Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
 
         /* Generate random matrix */
-        if(SET_SEED) srand(0);
-        else srand(MPI_Wtime());
+        if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, 1);
+        else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
         randMatrix(A, glob_cols, glob_rows);
         if(DEBUG) {
             fprintf(fp_log,"Initializing array A: \n");
