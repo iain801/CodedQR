@@ -4,6 +4,6 @@
 cd $SLURM_SUBMIT_DIR
 
 /bin/hostname
-mpicc codedqr_on_sq.c -o codedqr_on_sq -lm
-mpirun -np 20 ./codedqr_on_sq
+make codedqr_on_sq
+mpirun -np 20 ./codedqr_on_sq 200 50
 rm codedqr_on_sq
