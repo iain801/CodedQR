@@ -16,10 +16,11 @@
 
 #include <stdlib.h>
 #include <math.h>
-#include <mpi.h>
-#include <mkl.h>
 #include <time.h>
 #include <stdio.h>
+
+#include <mpi.h>
+#include <mkl.h>
 
 #define MASTER 0    /* taskid of first task */
 #define DIST_Q 1    /* code for mpi send/recv */
@@ -31,6 +32,8 @@
 
 FILE *fp_log;
 VSLStreamStatePtr stream;
+MPI_Comm glob_comm, row_comm, col_comm;
+MPI_Group row_group, col_group;
 
 void printMatrix(double* matrix, int cols, int rows) {
     for (int i = 0; i < rows; ++i) {
@@ -48,12 +51,43 @@ void randMatrix(double* A, int n, int m) {
 }
 
 /* sets B = QR and returns 1-norm of A - B */
-double checkError(double* A, double* Q, double* R, double* B, int glob_cols, int glob_rows) {
-    LAPACKE_dlacpy(CblasRowMajor,'A', glob_rows, glob_cols, Q, glob_cols, B, glob_cols);
-    cblas_dtrmm(CblasRowMajor, CblasRight, CblasUpper, CblasNoTrans, CblasNonUnit,
-                    glob_rows, glob_cols, 1, R, glob_cols, B, glob_cols);
-    cblas_daxpy(glob_cols*glob_rows, -1, A, 1, B, 1);
-    return cblas_dnrm2(glob_cols*glob_rows, B, 1);
+double checkError(double* A, double* Q, double* R, double* B, 
+    int loc_cols, int loc_rows, int glob_cols, int glob_rows) {
+    
+    double out_norm = 0;    
+
+    double  *Q_bar = (double*) calloc(loc_rows * glob_cols, sizeof(double)), 
+            *R_bar = (double*) calloc(loc_cols * glob_rows, sizeof(double));
+
+    MPI_Allgather(Q, loc_rows * loc_cols, MPI_DOUBLE, Q_bar, 
+        loc_rows * loc_cols, MPI_DOUBLE, row_comm);
+    MPI_Allgather(R, loc_rows * loc_cols, MPI_DOUBLE, R_bar, 
+        loc_rows * loc_cols, MPI_DOUBLE, col_comm);
+
+    int proc_cols = glob_cols / loc_cols;
+    for (int pc =0; pc < proc_cols; ++pc) {
+
+        int offset = pc * loc_cols * loc_rows;
+        for (int i=0; i < loc_cols; ++i) {
+            for (int j=0; j < loc_rows; ++j) {
+                for (int k=0; k < loc_cols; ++k) {
+                    B[j * loc_rows + i] += Q_bar[offset + j * loc_cols + k] * R_bar[offset + k * loc_cols + i];
+                }
+            }
+        }
+
+    }
+
+    cblas_daxpy(loc_cols*loc_rows, -1, A, 1, B, 1);
+
+    double part_norm = cblas_dnrm2(loc_cols*loc_rows, B, 1);
+    
+    MPI_Reduce(&part_norm, &out_norm, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+
+    free(Q_bar);
+    free(R_bar);
+
+    return out_norm;
 }
 
 void scatterA(double* A, double* Q, int p_rank, 
@@ -85,7 +119,7 @@ void scatterA(double* A, double* Q, int p_rank,
                 int target = j * proc_cols + i;
                 if (target != p_rank)
                     MPI_Send(Q, loc_cols * loc_rows, MPI_DOUBLE,
-                        target, DIST_Q, MPI_COMM_WORLD);
+                        target, DIST_Q, glob_comm);
             }
         }
     }
@@ -93,7 +127,7 @@ void scatterA(double* A, double* Q, int p_rank,
     /* If not master recieve Q */
     if (p_rank > MASTER) {
         MPI_Recv(Q, loc_cols * loc_rows, MPI_DOUBLE,
-            MASTER, DIST_Q, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MASTER, DIST_Q, glob_comm, MPI_STATUS_IGNORE);
         
     }
     
@@ -105,53 +139,44 @@ void scatterA(double* A, double* Q, int p_rank,
     }
 }
 
-void gatherQR(double** Q, double** R, int p_rank, 
-    int proc_cols, int proc_rows, int loc_cols, int loc_rows) {
+void gatherA(double** A,  int p_rank, int proc_cols, 
+    int proc_rows, int loc_cols, int loc_rows) {
 
     int i, j, k, l;
     int glob_cols = loc_cols * proc_cols;
     int glob_rows = loc_rows * proc_rows;
 
-    /* Master compiles Q and R from across processes */
+    /* Master compiles matrix A from across processes */
     if (p_rank == MASTER) {
-        double *Q_global = (double*) malloc(glob_cols * glob_rows * sizeof(double));
-        double *R_global = (double*) malloc(glob_cols * glob_rows * sizeof(double));
+        double *A_glob = (double*) malloc(glob_cols * glob_rows * sizeof(double));
         for (i = 0; i < proc_cols; ++i) {
             for (j = 0; j < proc_rows; ++j) {
 
-                /* If target not master, recieve Q and R */
+                /* If target not master, recieve A */
                 int target = j * proc_cols + i;
                 if (target != MASTER) {
-                    MPI_Recv(*Q, loc_cols * loc_rows, MPI_DOUBLE,
-                        target, COMP_Q, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    MPI_Recv(*R, loc_cols * loc_rows, MPI_DOUBLE,
-                        target, COMP_R, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    MPI_Recv(*A, loc_cols * loc_rows, MPI_DOUBLE,
+                        target, COMP_Q, glob_comm, MPI_STATUS_IGNORE);
                 }
 
                 int r_off = loc_rows * j;
                 int c_off = loc_cols * i;
                 for (k = 0; k < loc_cols; ++k) {
                     for (l = 0; l < loc_rows; ++l) {
-                        Q_global[ (r_off + l) * glob_cols + (c_off + k) ] 
-                            = (*Q)[l*loc_cols + k];
-                        R_global[ (r_off + l) * glob_cols + (c_off + k) ] 
-                            = (*R)[l*loc_cols + k];
+                        A_glob[ (r_off + l) * glob_cols + (c_off + k) ] 
+                            = (*A)[l*loc_cols + k];
                     }
                 }
             }
         }
-        free(*Q);
-        free(*R);
-        *(Q) = Q_global;
-        *(R) = R_global;
+        free(*A);
+        *(A) = A_glob;
     }
 
-    /* If not master send Q and R*/
+    /* If not master send A*/
     if (p_rank > MASTER) {
-        MPI_Send(*Q, loc_cols * loc_rows, MPI_DOUBLE,
-            MASTER, COMP_Q, MPI_COMM_WORLD);
-        MPI_Send(*R, loc_cols * loc_rows, MPI_DOUBLE,
-            MASTER, COMP_R, MPI_COMM_WORLD);
+        MPI_Send(*A, loc_cols * loc_rows, MPI_DOUBLE,
+            MASTER, COMP_Q, glob_comm);
     }  
 }
 
@@ -160,21 +185,16 @@ void constructGv(double* Gv, int proc_rows, int f) {
     int i, j, k;
 
     int p_rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);  
+    MPI_Comm_rank(glob_comm, &p_rank);  
 
     double* V = calloc(((proc_rows - f) - f) * f, sizeof(double));
     randMatrix(V, (proc_rows - f) - f, f);
     
-    /* G_pre = [-1/2*VV^T V]*/
-    for (i = 0; i < f; ++i) {
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, f, f, proc_rows - 2*f, 
+        -0.5, V, proc_rows - 2*f, V, proc_rows - 2*f, 0, Gv, proc_rows - f);
+    
+    LAPACKE_dlacpy(CblasRowMajor, 'A', f, proc_rows - 2*f, V, proc_rows - 2*f, Gv + f, proc_rows - f);
 
-        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, f, f, proc_rows - 2*f, 
-            -0.5, V, proc_rows - 2*f, V, proc_rows - 2*f, 0, Gv, proc_rows - f);
-        
-        for (j = f; j < (proc_rows - f); ++j) {
-            Gv[i*(proc_rows - f) + j] = V[i*((proc_rows - f) - f) + j - f];
-        }
-    }
     if (DEBUG) {
         fprintf(fp_log, "V:\n");
         printMatrix(V, (proc_rows - f) - f, f);
@@ -190,9 +210,9 @@ void constructGh(double* Gh, int proc_cols, int f) {
     randMatrix(Gh, proc_cols-f, f);
 }
 
-void genFail(double* Q, int target_row, int p_row, int loc_cols, int loc_rows) {
+void genFail(double* Q, int target_rank, int p_rank, int loc_cols, int loc_rows) {
     int dim = loc_cols * loc_rows;
-    if (target_row == p_row)
+    if (target_rank == p_rank)
         for (int i=0; i < dim; ++i) {
             Q[i] = 0;
         }
@@ -202,11 +222,8 @@ void reconstructQ(double* Q, double* Gv_tilde, int target_row, int p_rank, int p
                     int loc_cols, int loc_rows) {
 
     int i;
-    MPI_Comm col_comm;
     int p_col = p_rank % proc_cols;
     int p_row = p_rank / proc_cols;
-
-    MPI_Comm_split(MPI_COMM_WORLD, p_col, p_rank, &col_comm);
 
     double* part_recon = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     
@@ -258,12 +275,8 @@ void pbmgs(double* Q, double* R, int p_rank,
     double  Qnorm, Qdot,            /* operation variables */
             Qnorm_loc, Qdot_loc;    /* operation local matrices */
 
-    MPI_Comm row_comm, col_comm;
     int p_col = p_rank % proc_cols;
     int p_row = p_rank / proc_cols;
-
-    MPI_Comm_split(MPI_COMM_WORLD, p_col, p_rank, &col_comm);
-    MPI_Comm_split(MPI_COMM_WORLD, p_row, p_rank, &row_comm);
 
     double* Qbar = (double*) malloc(loc_cols * loc_rows * sizeof(double));
     double* Rbar = (double*) malloc(loc_cols * loc_rows * sizeof(double));
@@ -371,7 +384,7 @@ void pbmgs(double* Q, double* R, int p_rank,
                 /* k = cols of Qbar */
                 for (k = 0; k < loc_cols; ++k) {
 
-                    /*  Q[:,j] reduced by Q[:,i] * R[i,j] */
+                    /*  Q[:,j] reduced by Q[:,k] * R[k,j] */
                     cblas_daxpy(loc_rows, -1 * Rbar[k*loc_cols + j], Qbar + k, loc_cols, Q + j, loc_cols);
 
                     /* Set R in the correct row in the correct node */                    
@@ -409,21 +422,31 @@ int main(int argc, char** argv) {
     /*********************** Initialize MPI *****************************/
 
     MPI_Init (&argc, &argv);
+    MPI_Comm_dup(MPI_COMM_WORLD, &glob_comm);
+
     char fname[99];
     sprintf(fname, "log_%d.txt", MPI_Wtime());
     fp_log = fopen(fname, "a");
 
-    MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &p_rank);  
+    MPI_Comm_size(glob_comm, &proc_size);
+    MPI_Comm_rank(glob_comm, &p_rank);  
 
-    proc_cols = 4;
-    proc_rows = proc_size / 4;
+    proc_cols = (int) sqrt(proc_size);
+    proc_rows = proc_size / proc_cols;
     max_fails = proc_rows - proc_cols;
 
     glob_cols = glob_rows = atoi(argv[1]);
     loc_cols = loc_rows = atoi(argv[2]);
     check_cols = 0;
     check_rows = loc_rows * max_fails;
+
+    int p_col = p_rank % proc_cols;
+    int p_row = p_rank / proc_cols;
+
+    MPI_Comm_split(glob_comm, p_col, p_rank, &col_comm);
+    MPI_Comm_split(glob_comm, p_row, p_rank, &row_comm);
+    MPI_Comm_group(row_comm, &row_group);
+    MPI_Comm_group(col_comm, &col_group);
 
     /******************* Initialize arrays ***************************/
 
@@ -457,6 +480,9 @@ int main(int argc, char** argv) {
     R = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     
     scatterA(A, Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+
+    if (p_rank == MASTER) free(A);
+    A = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     
     /* Start timer*/
     t1 = MPI_Wtime();
@@ -471,15 +497,10 @@ int main(int argc, char** argv) {
         constructGv(Gv_tilde, proc_rows, max_fails);
 
     /* Broadcast Gv from master node */
-    MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, MPI_COMM_WORLD);
+    MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm);
 
-    MPI_Comm col_comm;
-    int p_col = p_rank % proc_cols;
-    int p_row = p_rank / proc_cols;
     int cs_row = p_row - (proc_rows - max_fails);
     int cs_col = p_col - proc_cols;// + max_fails;
-
-    MPI_Comm_split(MPI_COMM_WORLD, p_col, p_rank, &col_comm);
 
     double* part_checksum = (double*) calloc(loc_cols * loc_rows, sizeof(double));
 
@@ -503,43 +524,74 @@ int main(int argc, char** argv) {
 
     /***************** R-Factor Checksums ****************************/
 
-    MPI_Comm row_comm;
-    MPI_Comm_split(MPI_COMM_WORLD, p_row, p_rank, &row_comm);
+    /****************** Copy A to Local Parts ************************/
+    
+    t1 += MPI_Wtime();
+    LAPACKE_dlacpy(CblasRowMajor,'A', loc_rows, loc_cols, Q, loc_cols, A, loc_cols);
+    t1 -= MPI_Wtime();
 
     /******************** Test Reconstruction ************************/
 
-    int failed_row = 4;
-    genFail(Q, failed_row, p_row, loc_cols, loc_rows);
-    reconstructQ(Q, Gv_tilde, failed_row, p_rank, proc_cols, proc_rows, max_fails, loc_cols, loc_rows);
+    // int failed_row = 4;
+    // genFail(Q, failed_row, p_row, loc_cols, loc_rows);
+    // reconstructQ(Q, Gv_tilde, failed_row, p_rank, proc_cols, proc_rows, max_fails, loc_cols, loc_rows);
     
     /************************ PBMGS **********************************/
     
     pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
 
-    /***************** Q-Factor Checksums ****************************/
+    /***************** Get average timing ****************************/
 
     /* End timer */
-    t2 = MPI_Wtime() - t1;
-
-    /*********** Compile Q and R from local blocks *******************/
-
-    gatherQR(&Q, &R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
-
-    /********************* Check Results *****************************/
+    t2 = MPI_Wtime() - t1;    
 
     /* Take average execution time */
     {
     double exec_time;
-    MPI_Reduce(&t2, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, MPI_COMM_WORLD);
-    t2 = 1000 * exec_time / proc_size;
+    MPI_Reduce(&t2, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t2 = exec_time / proc_size;
     }
+
+    /********************* Check Results *****************************/
+
+    double* B = calloc(loc_cols * loc_rows, sizeof(double));
+    double error_norm;
+
+    double t3 = MPI_Wtime();
+    
+    error_norm = checkError(A, Q, R, B, loc_cols, loc_rows, glob_cols + check_cols, glob_rows + check_rows);  
+    
+    double t4 = MPI_Wtime() - t3;   
+
+    /* Take average checking time */
+    {
+    double exec_time;
+    MPI_Reduce(&t4, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t4 = exec_time / proc_size;
+    }     
+        
+    /*********** Compile Q and R from local blocks *******************/
+
+    gatherA(&A, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+    gatherA(&Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+    gatherA(&R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+    gatherA(&B, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
 
     if (p_rank == MASTER) {
 
         if (glob_cols < 100 && glob_rows < 100) {
             fprintf(fp_log,"\n");
-            fprintf(fp_log,"Matrix A:\n");
+            fprintf(fp_log,"Matrix A1:\n");
             printMatrix(A, glob_cols, glob_rows);
+
+            fprintf(fp_log,"Matrix A2:\n");
+            printMatrix(A + (glob_cols * glob_rows), glob_cols, check_rows);
+
+            fprintf(fp_log,"Matrix B1:\n");
+            printMatrix(B, glob_cols, glob_rows);
+
+            fprintf(fp_log,"Matrix B2:\n");
+            printMatrix(B + (glob_cols * glob_rows), glob_cols, check_rows);
 
             fprintf(fp_log,"Matrix Q1:\n");
             printMatrix(Q, glob_cols, glob_rows);
@@ -551,20 +603,19 @@ int main(int argc, char** argv) {
             printMatrix(R, glob_cols, glob_rows);
         }
     
-        //Check error = A - QR (should be near 0)
-        if (glob_cols < 1000 && glob_rows < 1000) {
-            double* B = malloc(glob_cols * glob_rows * sizeof(double));
-            double sum = checkError(A, Q, R, B, glob_cols, glob_rows);          
-            if (sum > 0 && glob_cols < 100 && glob_rows < 100) {
-                fprintf(fp_log,"Matrix B:\n");
-                printMatrix(B, glob_cols, glob_rows);
-            }
-            fprintf(fp_log,"Roundoff Error: %f\n", sum); 
-        }
-        fprintf(fp_log,"Execution Time: %.3f ms\n", t2);
+        fprintf(fp_log,"Execution Time: %.5f s\n", t2);
+        fprintf(fp_log,"Checking Time: %.5f s\n", t4);
+        fprintf(fp_log,"Roundoff Error: %f\n", error_norm); 
     }
 
     if(p_rank == MASTER) fprintf(fp_log,"\n\n");
     fclose(fp_log);
+
+    MPI_Comm_free(&glob_comm);
+    MPI_Comm_free(&row_comm);
+    MPI_Comm_free(&col_comm);
+    MPI_Group_free(&row_group);
+    MPI_Group_free(&col_group);
+
     MPI_Finalize();
 }
