@@ -1,9 +1,9 @@
 EXECS= codedqr_base codedqr_main pbmgs_mpi
-MPICC?=mpiicpc 
+MPICC?=mpiicc 
 CC = icc
 IDIR = ${MKLROOT}/include
 LDIR = ${MKLROOT}/lib/intel64
-CFLAGS= -cxx=icpx -fsycl -m64 -I$(IDIR) -L$(LDIR)
+CFLAGS= -m64 -I$(IDIR) -L$(LDIR)
 LIBS = -lmkl_scalapack_lp64 -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lmkl_blacs_intelmpi_lp64 -lpthread -lm -ldl
 
 codedqr: codedqr_base.o codedqr_main.o

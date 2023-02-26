@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
     MPI_Comm_dup(MPI_COMM_WORLD, &glob_comm);
 
     char fname[99];
-    sprintf(fname, "log_%d.txt", MPI_Wtime());
+    sprintf(fname, "log_%f.txt", MPI_Wtime());
     fp_log = fopen(fname, "a");
 
     MPI_Comm_size(glob_comm, &proc_size);
@@ -161,7 +161,7 @@ int main(int argc, char** argv) {
 
     /********************* Check Results *****************************/
 
-    double* B = calloc(loc_cols * loc_rows, sizeof(double));
+    double* B = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     double error_norm;
 
     double t3 = MPI_Wtime();

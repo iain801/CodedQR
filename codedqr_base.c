@@ -159,7 +159,7 @@ void constructGv(double* Gv, int proc_rows, int f) {
     int p_rank;
     MPI_Comm_rank(glob_comm, &p_rank);  
 
-    double* V = calloc(((proc_rows - f) - f) * f, sizeof(double));
+    double* V = (double*) calloc(((proc_rows - f) - f) * f, sizeof(double));
     randMatrix(V, (proc_rows - f) - f, f);
     
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, f, f, proc_rows - 2*f, 
