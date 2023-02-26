@@ -1,12 +1,7 @@
 /* Coded Parallel Block Modified Gram Schmidt
- * implementation with MPI using [INSERT] checksum storage
- * for random square matrix A(n,n)
- * Using MGS in place of ICGS 
- * Takes arguements of: 
- *      np = (From MPI) number of submatrices
- *      n = global matrix dimension (n x n matrix) 
- *      f = number of tolerable faults
- *
+ * implementation with MPI using Off node checksum storage
+ * Core functions
+ * 
  * Iain Weissburg 2023
  */
 

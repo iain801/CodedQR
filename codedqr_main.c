@@ -1,3 +1,14 @@
+/* Main Runner file for Coded QR PBMGS
+ * for random square matrix A(n,n)
+ * Using MGS in place of ICGS 
+ * Takes arguements of: 
+ *      np = (From MPI) number of submatrices
+ *      n = global matrix dimension (n x n matrix) 
+ *      f = number of tolerable faults
+ *
+ * Iain Weissburg 2023
+ */
+
 #include "codedqr_base.h"
 
 int main(int argc, char** argv) {
