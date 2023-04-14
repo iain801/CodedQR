@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
         fprintf(fp_log,"Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
 
         /* Generate random matrix */
-        if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, 1);
+        if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, SET_SEED);
         else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
         randMatrix(A, glob_cols, glob_rows);
         if(DEBUG) {

@@ -21,13 +21,13 @@
 #include <mpi.h>
 #include <mkl.h>
 
-#define MASTER 0    /* taskid of first task */
-#define DIST_Q 1    /* code for mpi send/recv */
-#define COMP_Q 2    /* code for mpi send/recv */
-#define COMP_R 3    /* code for mpi send/recv */
+#define MASTER 0        /* taskid of first task */
+#define DIST_Q 1        /* code for mpi send/recv */
+#define COMP_Q 2        /* code for mpi send/recv */
+#define COMP_R 3        /* code for mpi send/recv */
 
-#define DEBUG 0     /* run in debug mode */
-#define SET_SEED 1  /* whether to set srand to 0 */
+#define DEBUG 0         /* run in debug mode */
+#define SET_SEED 42     /* choose random seed, time-based if 0 */
 
 FILE *fp_log;
 VSLStreamStatePtr stream;
