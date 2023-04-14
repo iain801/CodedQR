@@ -38,7 +38,7 @@ void printMatrix(double* matrix, int cols, int rows);
 
 void randMatrix(double* A, int n, int m);
 
-double checkError(double* A, double* Q, double* R, double* B, 
+double checkError(double* A, double* Q, double* R, double* E, 
     int loc_cols, int loc_rows, int glob_cols, int glob_rows);
 
 void scatterA(double* A, double* Q, int p_rank, 

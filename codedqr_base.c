@@ -22,8 +22,8 @@ void randMatrix(double* A, int n, int m) {
     vdRngGaussian( VSL_RNG_METHOD_GAUSSIAN_BOXMULLER, stream, n*m, A, 0, 1 );
 }
 
-/* sets B = QR and returns 1-norm of A - B */
-double checkError(double* A, double* Q, double* R, double* B, 
+/* sets E = QR and returns 1-norm of A - E */
+double checkError(double* A, double* Q, double* R, double* E, 
     int loc_cols, int loc_rows, int glob_cols, int glob_rows) {
     
     double out_norm = 0;    
@@ -43,16 +43,16 @@ double checkError(double* A, double* Q, double* R, double* B,
         for (int i=0; i < loc_cols; ++i) {
             for (int j=0; j < loc_rows; ++j) {
                 for (int k=0; k < loc_cols; ++k) {
-                    B[j * loc_rows + i] += Q_bar[offset + j * loc_cols + k] * R_bar[offset + k * loc_cols + i];
+                    E[j * loc_rows + i] += Q_bar[offset + j * loc_cols + k] * R_bar[offset + k * loc_cols + i];
                 }
             }
         }
 
     }
 
-    cblas_daxpy(loc_cols*loc_rows, -1, A, 1, B, 1);
+    cblas_daxpy(loc_cols*loc_rows, -1, A, 1, E, 1);
 
-    double part_norm = cblas_dnrm2(loc_cols*loc_rows, B, 1);
+    double part_norm = cblas_dnrm2(loc_cols*loc_rows, E, 1);
     
     MPI_Reduce(&part_norm, &out_norm, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
 
