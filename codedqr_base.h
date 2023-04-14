@@ -2,10 +2,6 @@
  * implementation with MPI using [INSERT] checksum storage
  * for random square matrix A(n,n)
  * Using MGS in place of ICGS 
- * Takes arguements of: 
- *      np = (From MPI) number of submatrices
- *      n = global matrix dimension (n x n matrix) 
- *      f = number of tolerable faults
  *
  * Iain Weissburg 2023
  */
@@ -57,8 +53,9 @@ void constructGh(double* Gh, int proc_cols, int f);
 
 void genFail(double* Q, int target_rank, int p_rank, int loc_cols, int loc_rows);
 
-void reconstructQ(double* Q, double* Gv_tilde, int target_row, int p_rank, 
-    int proc_cols, int proc_rows, int max_fails, int loc_cols, int loc_rows);
+void reconstructQ(double* Q, double* Gv_tilde, int* node_status, int p_rank, 
+                    int proc_cols, int proc_rows, int max_fails,
+                    int loc_cols, int loc_rows);
 
 void pbmgs(double* Q, double* R, int p_rank, 
     int proc_cols, int proc_rows, int loc_cols, int loc_rows);

@@ -179,7 +179,7 @@ void constructGv(double* Gv, int proc_rows, int f) {
 
 /* Actually Gh for R-factor protection, random */
 void constructGh(double* Gh, int proc_cols, int f) {
-    randMatrix(Gh, proc_cols-f, f);
+    randMatrix(Gh, f, proc_cols-f);
 }
 
 void genFail(double* Q, int target_rank, int p_rank, int loc_cols, int loc_rows) {
@@ -190,53 +190,99 @@ void genFail(double* Q, int target_rank, int p_rank, int loc_cols, int loc_rows)
         }
 }
 
-void reconstructQ(double* Q, double* Gv_tilde, int target_row, int p_rank, int proc_cols, int proc_rows, int max_fails,
+/* TODO: 
+        For failed node p_row == j
+        Take success row j * first_m_nodes:
+            success[i, first_m_nodes_i[j]] * Q[j, i]
+            reduce to failed node
+*/
+void reconstructQ(double* Q, double* Gv_tilde, int* node_status, int p_rank, 
+                    int proc_cols, int proc_rows, int max_fails,
                     int loc_cols, int loc_rows) {
 
-    int i;
+    int i, j, k;
     int p_col = p_rank % proc_cols;
     int p_row = p_rank / proc_cols;
+    double* Q_bar;
 
-    double* part_recon = (double*) calloc(loc_cols * loc_rows, sizeof(double));
+    /* if node is active */
+    if (node_status[p_row]) {
+
+        /*********** Compute Success Matrix ****************/
+        int m = proc_rows - max_fails;
+        int n = proc_cols /*- max_fails*/;
+
+        /* first m active nodes map */
+        int* first_m_nodes = (int*) calloc(m, sizeof(int));
+
+        /* inverse active node map */
+        int* first_m_nodes_i = (int*) calloc(proc_rows, sizeof(int));
+
+        for (i=0, j=0; j < m; ++i) {
+            if (node_status[i]) {
+                first_m_nodes_i[i] = j;
+                first_m_nodes[j++] = i;
+            }
+            /* if node is failed, set inverse map to -1 */
+            else {
+                first_m_nodes_i[i] = -1;
+            }
+        }
+
+        /* finish filling inverse map with -1 */
+        for (;i<proc_rows;++i) {
+            first_m_nodes_i[i] = -1;
+        }
+
+        double* Gv_succ = (double*) calloc(n * m, sizeof(double));
+        for (i=0; i < m; ++i) {
+            if (first_m_nodes[i] < m) {
+                Gv_succ[i * n + first_m_nodes[i]] = 1;
+            }
+            else {
+                cblas_dcopy(n, Gv_tilde + (first_m_nodes[i] - m) * n, 1, Gv_succ + i * n, 1);
+            }
+        }
+
+        /* Take inverse of success matrix */
+        int* ipiv = (int*) malloc (m * sizeof(int));
+        LAPACKE_dgetrf(CblasRowMajor, m, n, Gv_succ, n, ipiv);
+        LAPACKE_dgetri(CblasRowMajor, m, Gv_succ, n, ipiv);
+        
+        if (p_row == first_m_nodes[0]) {
+            printMatrix(Gv_succ, n, m);
+        }
+
+        /************ Perform Matrix Reductions ***********/
+        
+        for(i=0; i<proc_rows; ++i) {
+            if(!node_status[i]) { 
+                Q_bar = (double*) calloc(loc_cols * loc_rows, sizeof(double));
+                if(first_m_nodes_i[p_row] != -1) {
+                    LAPACKE_dlacpy(CblasRowMajor, 'A', loc_cols, loc_rows, Q, loc_cols, Q_bar, loc_cols);
+                    cblas_dscal(n*m, Gv_succ[p_row * n + first_m_nodes_i[p_row]], Q_bar, 1);
+
+                    fprintf(fp_log, "Q_bar %d, %d:\n", p_col, p_row);
+                    printMatrix(Q_bar, loc_cols, loc_rows);
+                }
+                MPI_Reduce(Q_bar, NULL, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, col_comm);
+                free(Q_bar);
+            }
+        }
+    }
+
+    /* If node is failed */
+    else {
+        Q_bar = (double*) calloc(loc_cols * loc_rows, sizeof(double));
+        for(i=0; i<proc_rows; ++i) {
+            if(!node_status[i]) {
+                MPI_Reduce(Q_bar, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, col_comm);
+            }
+        }
+        fprintf(fp_log, "Q %d, %d:\n", p_col, p_row);
+        printMatrix(Q, loc_cols, loc_rows);
+    }
     
-    if (target_row >= proc_rows - max_fails) { //if target node is checksum
-        if (p_row != target_row) { //if not target
-            for (i=0; i < loc_cols * loc_rows; ++i) {
-                part_recon[i] = Gv_tilde[(target_row - proc_rows + max_fails) * (proc_rows - max_fails) + p_row] * Q[i];
-            }
-            MPI_Reduce(part_recon, NULL, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, target_row, col_comm);
-        }
-        else { //reduce checksums to target node
-            MPI_Reduce(part_recon, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, target_row, col_comm);
-        }
-    }
-
-    else { //if target node is regular node
-        //TODO: support multiple failiures, maybe use a send-recieve scheme instead of reduce
-        int checksum_row = 0;
-
-        if (p_row != target_row) { //if not target
-            if (p_row < proc_rows - max_fails) { //if regular node
-                for (i=0; i < loc_cols * loc_rows; ++i) {
-                    part_recon[i] = -1 * Gv_tilde[checksum_row * (proc_rows - max_fails) + p_row] * Q[i];
-                }
-            }
-            else if (p_row == checksum_row + proc_rows - max_fails) { //if selected checksum
-                for (i=0; i < loc_cols * loc_rows; ++i) {
-                    part_recon[i] = Q[i];
-                }
-            }
-            MPI_Reduce(part_recon, NULL, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, target_row, col_comm);
-        }
-        else { //reduce to target node
-            MPI_Reduce(part_recon, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, target_row, col_comm);
-            
-            /* divide by correct G term */
-            for (i=0; i < loc_cols * loc_rows; ++i) { 
-                Q[i] *= 1 / Gv_tilde[checksum_row * (proc_rows - max_fails) + p_row];
-            }
-        }
-    }
 }
 
 void pbmgs(double* Q, double* R, int p_rank, 
