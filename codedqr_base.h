@@ -29,7 +29,6 @@
 #define DEBUG 0         /* run in debug mode */
 #define SET_SEED 42     /* choose random seed, time-based if 0 */
 
-FILE *fp_log;
 VSLStreamStatePtr stream;
 MPI_Comm glob_comm, row_comm, col_comm;
 MPI_Group row_group, col_group;

@@ -262,9 +262,11 @@ void reconstructQ(double* Q, double* Gv_tilde, int* node_status, int p_rank,
             }
         }
 
-        if (p_row == first_m_nodes[0]) {
+        if (DEBUG && p_row == first_m_nodes[0]) {
             printf( "Gv_succ %d, %d:\n", p_col, p_row);
             printMatrix(Gv_succ, n, m);
+            printf( "Gv %d, %d:\n", p_col, p_row);
+            printMatrix(Gv_tilde, n, max_fails);
         }
 
         /* Take inverse of success matrix */
@@ -283,7 +285,7 @@ void reconstructQ(double* Q, double* Gv_tilde, int* node_status, int p_rank,
                     /* Copy Q to Qbar*/
                     LAPACKE_dlacpy(CblasRowMajor, 'A', loc_cols, loc_rows, Q, loc_cols, Q_bar, loc_cols);
                     /* Mult Qbar by corrosponding Gv_succ term*/
-                    cblas_dscal(n*m, Gv_succ[p_row * n + first_m_nodes_i[p_row]], Q_bar, 1);
+                    cblas_dscal(n*m, Gv_succ[i * n + first_m_nodes_i[p_row]], Q_bar, 1);
 
                     printf( "Q_bar %d, %d:\n", p_col, p_row);
                     printMatrix(Q_bar, loc_cols, loc_rows);

@@ -48,10 +48,6 @@ int main(int argc, char** argv) {
     check_cols = 0;
     check_rows = loc_rows * max_fails;
 
-    char fname[99];
-    sprintf(fname, "log_%d_%dx_%d.txt", proc_size, glob_cols, loc_cols);
-    fp_log = fopen(fname, "a");
-
     p_col = p_rank % proc_cols;
     p_row = p_rank / proc_cols;
 
@@ -240,7 +236,6 @@ int main(int argc, char** argv) {
     }
 
     if(p_rank == MASTER) printf("\n\n");
-    fclose(fp_log);
 
     MPI_Comm_free(&glob_comm);
     MPI_Comm_free(&row_comm);
