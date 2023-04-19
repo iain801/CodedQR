@@ -36,6 +36,8 @@ MPI_Group row_group, col_group;
 
 void printMatrix(double* matrix, int cols, int rows);
 
+void iprintMatrix(int* matrix, int cols, int rows);
+
 void randMatrix(double* A, int n, int m);
 
 double checkError(double* A, double* Q, double* R, double* E, 

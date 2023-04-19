@@ -1,9 +1,8 @@
 #!/bin/bash -l
-#SBATCH --nodes=4 --ntasks-per-node=20
+#SBATCH --nodes=1 --ntasks-per-node=6
 
 cd $SLURM_SUBMIT_DIR
 
 /bin/hostname
 make codedqr
-mpirun -np 80 ./codedqr_main 800 100
-make clean
+mpirun -np 6 ./out/codedqr_main 4 2

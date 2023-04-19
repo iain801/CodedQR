@@ -10,11 +10,21 @@
 void printMatrix(double* matrix, int cols, int rows) {
     for (int i = 0; i < rows; ++i) {
         for (int j = 0; j < cols; ++j) {
-            fprintf(fp_log,"%.3f ", matrix[i*cols + j]);
+            printf("%.3f ", matrix[i*cols + j]);
         }
-        fprintf(fp_log,"\n");
+        printf("\n");
     }
-    fprintf(fp_log,"\n");
+    printf("\n");
+}
+
+void iprintMatrix(int* matrix, int cols, int rows) {
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            printf("%d ", matrix[i*cols + j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
 }
 
 /* Fill Matrix with standard normal randoms */
@@ -47,7 +57,6 @@ double checkError(double* A, double* Q, double* R, double* E,
                 }
             }
         }
-
     }
 
     cblas_daxpy(loc_cols*loc_rows, -1, A, 1, E, 1);
@@ -106,7 +115,7 @@ void scatterA(double* A, double* Q, int p_rank,
     if(DEBUG) {
         int p_col = p_rank % proc_cols;
         int p_row = p_rank / proc_cols;
-        fprintf(fp_log,"Q_initial (%d,%d)\n", p_col, p_row);
+        printf("Q_initial (%d,%d)\n", p_col, p_row);
         printMatrix(Q, loc_cols, loc_rows);
     }
 }
@@ -168,9 +177,9 @@ void constructGv(double* Gv, int proc_rows, int f) {
     LAPACKE_dlacpy(CblasRowMajor, 'A', f, proc_rows - 2*f, V, proc_rows - 2*f, Gv + f, proc_rows - f);
 
     if (DEBUG) {
-        fprintf(fp_log, "V:\n");
+        printf( "V:\n");
         printMatrix(V, (proc_rows - f) - f, f);
-        fprintf(fp_log, "G_pre:\n");
+        printf( "G_pre:\n");
         printMatrix(Gv, (proc_rows - f), f);
     }
 
@@ -179,7 +188,7 @@ void constructGv(double* Gv, int proc_rows, int f) {
 
 /* Actually Gh for R-factor protection, random */
 void constructGh(double* Gh, int proc_cols, int f) {
-    randMatrix(Gh, f, proc_cols-f);
+    randMatrix(Gh, f, proc_cols - f);
 }
 
 void genFail(double* Q, int target_rank, int p_rank, int loc_cols, int loc_rows) {
@@ -212,12 +221,13 @@ void reconstructQ(double* Q, double* Gv_tilde, int* node_status, int p_rank,
         int m = proc_rows - max_fails;
         int n = proc_cols /*- max_fails*/;
 
-        /* first m active nodes map */
+        /* first m active nodes map, first_m_nodes[index] = node */
         int* first_m_nodes = (int*) calloc(m, sizeof(int));
 
-        /* inverse active node map */
+        /* inverse active node map, first_m_nodes_i[node] = index */
         int* first_m_nodes_i = (int*) calloc(proc_rows, sizeof(int));
 
+        /* fill node maps with first m active nodes */
         for (i=0, j=0; j < m; ++i) {
             if (node_status[i]) {
                 first_m_nodes_i[i] = j;
@@ -234,35 +244,48 @@ void reconstructQ(double* Q, double* Gv_tilde, int* node_status, int p_rank,
             first_m_nodes_i[i] = -1;
         }
 
+        if (DEBUG && p_row == first_m_nodes[0]) {
+            printf( "node maps %d, %d:\n", p_col, p_row);
+            iprintMatrix(first_m_nodes, m, 1);
+            iprintMatrix(first_m_nodes_i, proc_rows, 1);
+        }
+
         double* Gv_succ = (double*) calloc(n * m, sizeof(double));
         for (i=0; i < m; ++i) {
-            if (first_m_nodes[i] < m) {
+            /* if regular node, set Gv_succ to 1 */
+            if (first_m_nodes[i] < m) { 
                 Gv_succ[i * n + first_m_nodes[i]] = 1;
             }
+            /* if checksum node, set Gv_succ to Gv_tidle */
             else {
                 cblas_dcopy(n, Gv_tilde + (first_m_nodes[i] - m) * n, 1, Gv_succ + i * n, 1);
             }
+        }
+
+        if (p_row == first_m_nodes[0]) {
+            printf( "Gv_succ %d, %d:\n", p_col, p_row);
+            printMatrix(Gv_succ, n, m);
         }
 
         /* Take inverse of success matrix */
         int* ipiv = (int*) malloc (m * sizeof(int));
         LAPACKE_dgetrf(CblasRowMajor, m, n, Gv_succ, n, ipiv);
         LAPACKE_dgetri(CblasRowMajor, m, Gv_succ, n, ipiv);
-        
-        if (p_row == first_m_nodes[0]) {
-            printMatrix(Gv_succ, n, m);
-        }
 
         /************ Perform Matrix Reductions ***********/
         
         for(i=0; i<proc_rows; ++i) {
+            /* if node i is failed*/
             if(!node_status[i]) { 
                 Q_bar = (double*) calloc(loc_cols * loc_rows, sizeof(double));
-                if(first_m_nodes_i[p_row] != -1) {
+                /* if chosen node */
+                if(first_m_nodes_i[p_row] > -1) {
+                    /* Copy Q to Qbar*/
                     LAPACKE_dlacpy(CblasRowMajor, 'A', loc_cols, loc_rows, Q, loc_cols, Q_bar, loc_cols);
+                    /* Mult Qbar by corrosponding Gv_succ term*/
                     cblas_dscal(n*m, Gv_succ[p_row * n + first_m_nodes_i[p_row]], Q_bar, 1);
 
-                    fprintf(fp_log, "Q_bar %d, %d:\n", p_col, p_row);
+                    printf( "Q_bar %d, %d:\n", p_col, p_row);
                     printMatrix(Q_bar, loc_cols, loc_rows);
                 }
                 MPI_Reduce(Q_bar, NULL, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, col_comm);
@@ -279,8 +302,6 @@ void reconstructQ(double* Q, double* Gv_tilde, int* node_status, int p_rank,
                 MPI_Reduce(Q_bar, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, col_comm);
             }
         }
-        fprintf(fp_log, "Q %d, %d:\n", p_col, p_row);
-        printMatrix(Q, loc_cols, loc_rows);
     }
     
 }
@@ -289,9 +310,9 @@ void pbmgs(double* Q, double* R, int p_rank,
     int proc_cols, int proc_rows, int loc_cols, int loc_rows) {
 
     int APC,                        /* active process column */
-        i, j, k;                    /* iterators */
-    double  Qnorm, Qdot,            /* operation variables */
-            Qnorm_loc, Qdot_loc;    /* operation local matrices */
+        i, j, k;                    /* iterator */
+    double  Qnorm, Qdot,            /* operation variable */
+            Qnorm_loc, Qdot_loc;    /* operation local variable */
 
     int p_col = p_rank % proc_cols;
     int p_row = p_rank / proc_cols;
@@ -322,7 +343,7 @@ void pbmgs(double* Q, double* R, int p_rank,
 
                 /* Set R to Qnorm in the correct row in the correct node */                    
                 if (p_row == (i + j) / loc_rows) {
-                    if(DEBUG) fprintf(fp_log,"Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, (i + j) % loc_rows, k);
+                    if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, (i + j) % loc_rows, k);
                     R[((i + j) % loc_rows)*loc_cols + j] = Qnorm;
                 }     
 
@@ -339,7 +360,7 @@ void pbmgs(double* Q, double* R, int p_rank,
                         MPI_DOUBLE, MPI_SUM, col_comm);
 
                     if(DEBUG) {
-                        fprintf(fp_log,"Qdot_%d: %.3f\n\n", p_col*loc_cols + k, Qdot);
+                        printf("Qdot_%d: %.3f\n\n", p_col*loc_cols + k, Qdot);
                     }
 
                     // Q[:,k] = Q[:,k] - Qdot * Qbar
@@ -348,14 +369,14 @@ void pbmgs(double* Q, double* R, int p_rank,
 
                     /* Set R to Qdot in the correct row in the correct node */                    
                     if (p_row == (i + j) / loc_rows) {
-                        if(DEBUG) fprintf(fp_log,"Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qdot, (i + j) % loc_rows, k);
+                        if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qdot, (i + j) % loc_rows, k);
                         R[((i + j) % loc_rows)*loc_cols + k] = Qdot;
                     }
                 }
             }
 
             if(DEBUG) {
-                fprintf(fp_log,"Q_reduced (%d,%d)\n", p_col, p_row);
+                printf("Q_reduced (%d,%d)\n", p_col, p_row);
                 printMatrix(Q, loc_cols, loc_rows);
             }
 
@@ -364,7 +385,7 @@ void pbmgs(double* Q, double* R, int p_rank,
         }
 
         if(DEBUG && p_col == APC) {
-            fprintf(fp_log,"Qbar_broadcast (%d,%d)\n", p_col, p_row);
+            printf("Qbar_broadcast (%d,%d)\n", p_col, p_row);
             printMatrix(Qbar, loc_cols, loc_rows);
         }
 
@@ -375,7 +396,7 @@ void pbmgs(double* Q, double* R, int p_rank,
         if (p_col > APC) {
             /* Local matrix multiply R = Qbar^T * Q */
             if(DEBUG) {
-                fprintf(fp_log,"Block (%d,%d) is being transformed at APC=%d\n\n", p_col, p_row, APC);
+                printf("Block (%d,%d) is being transformed at APC=%d\n\n", p_col, p_row, APC);
             }
 
             /* j = cols of Q in local block */
@@ -395,7 +416,7 @@ void pbmgs(double* Q, double* R, int p_rank,
                 }
 
                 if(DEBUG) {
-                    fprintf(fp_log,"R_summed (%d,%d) j=%d\n", p_col, p_row, j);
+                    printf("R_summed (%d,%d) j=%d\n", p_col, p_row, j);
                     printMatrix(R, loc_cols, loc_cols);
                 }
 
@@ -413,7 +434,7 @@ void pbmgs(double* Q, double* R, int p_rank,
                 }
 
                 if(DEBUG) {
-                    fprintf(fp_log,"Q_reduced2 (%d,%d) j=%d\n", p_col, p_row, j);
+                    printf("Q_reduced2 (%d,%d) j=%d\n", p_col, p_row, j);
                     printMatrix(R, loc_cols, loc_cols);
                 }
 
