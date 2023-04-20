@@ -73,15 +73,7 @@ int main(int argc, char** argv) {
             printf("Initializing array A: \n");
             printMatrix(A, glob_cols, glob_rows);
         }
-
     }
-    /* TODO: 
-     *  - Generate V and broadcast
-     *  - Each checksum node uses one row of G_pre times column of A nodes
-     *  - calculate grid -> distribute A -> calculate checksums.
-     *  - extract Q and R
-     *  - Test failiure and reconstruction
-     */
 
     /************* Distribute A across process Q *********************/
 
@@ -134,16 +126,18 @@ int main(int argc, char** argv) {
 
     /******************** Test Reconstruction ************************/
 
-    if (p_col == 0) {
-        genFail(Q, 4, p_rank, loc_cols, loc_rows);
-        int node_status[3] = {1, 1, 0};
-        reconstructQ(Q, node_status, p_rank);
-    }
-    else if (p_col == 1) {
-        genFail(Q, 1, p_rank, loc_cols, loc_rows);
-        int node_status[3] = {0, 1, 1};
-        reconstructQ(Q, node_status, p_rank);
-    }
+    // genFail(Q, 0, p_rank, loc_cols, loc_rows);
+    // genFail(Q, 1, p_rank, loc_cols, loc_rows);
+    // genFail(Q, 2, p_rank, loc_cols, loc_rows);
+    genFail(Q, 3, p_rank, loc_cols, loc_rows);
+    genFail(Q, 4, p_rank, loc_cols, loc_rows);
+    genFail(Q, 5, p_rank, loc_cols, loc_rows);
+    // genFail(Q, 9, p_rank, loc_cols, loc_rows);
+    // genFail(Q, 10, p_rank, loc_cols, loc_rows);
+    // genFail(Q, 11, p_rank, loc_cols, loc_rows);
+
+    int node_status[5] = {1, 0, 1, 1, 1};
+    reconstructQ(Q, node_status, p_rank);
     
     /************************ PBMGS **********************************/
     
