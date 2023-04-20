@@ -60,3 +60,4 @@ dkms.conf
 # Output files
 *.out
 log_*.txt
+out/*
