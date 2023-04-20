@@ -6,6 +6,7 @@
  *      n = global matrix dimension (n x n matrix) 
  *      l = local matrix dimension (l x l matrices)
  *
+ * NOTE: Fault-Tolerance tested on Intel MPI 2021.5
  * Iain Weissburg 2023
  */
 
@@ -108,33 +109,22 @@ int main(int argc, char** argv) {
     /* Broadcast Gv and Gh from master node */
     MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm);
     MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
-    
-    /***************** Q-Factor Checksums ****************************/
-    int i, j;
-    int cs_row = p_row - (proc_rows - max_fails);
-    int cs_col = p_col - proc_cols;// + max_fails;
-    
-    double* part_checksum = (double*) calloc(loc_cols * loc_rows, sizeof(double));
 
-    if (cs_row < 0) { //if non-checksum node
-        for (j=0; j < max_fails; ++j) {
-            for (i=0; i < loc_cols * loc_rows; ++i) {
-                part_checksum[i] = Gv_tilde[j * (proc_rows - max_fails) + p_row] * Q[i];
-            }
-            MPI_Reduce(part_checksum, NULL, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, j + proc_rows - max_fails, col_comm);
-        }
-    }
-    else { //reduce checksums to checksum nodes
-        for (j=0; j < max_fails; ++j) {
-            MPI_Reduce(part_checksum, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, j + proc_rows - max_fails, col_comm);
-            if (DEBUG && j==cs_row) {
-                printf( "Checkum node %d Q is now:\n", p_rank);
-                printMatrix(Q, loc_cols, loc_rows);
-            }
-        }
-    }
+    /***************** Setup recon_inf Struct ************************/
 
-    /***************** R-Factor Checksums ****************************/
+    recon_inf.Gv_tilde = Gv_tilde;
+    recon_inf.loc_cols = loc_cols;
+    recon_inf.loc_rows = loc_rows;
+    recon_inf.max_fails = max_fails;
+    recon_inf.p_rank = p_rank;
+    recon_inf.proc_cols = proc_cols;
+    recon_inf.proc_rows = proc_rows;
+
+    /******************* Q-Factor Checksums **************************/
+    
+    checksumQ(Q, p_rank);
+
+    /******************* R-Factor Checksums **************************/
 
     /****************** Copy A to Local Parts ************************/
     
@@ -144,22 +134,15 @@ int main(int argc, char** argv) {
 
     /******************** Test Reconstruction ************************/
 
-    genFail(Q, 1, p_rank, loc_cols, loc_rows);
     if (p_col == 0) {
-        int node_status[3] = {1, 0, 1};
-        reconstructQ(Q, Gv_tilde, node_status, p_rank, proc_cols, proc_rows, max_fails, loc_cols, loc_rows);
+        genFail(Q, 4, p_rank, loc_cols, loc_rows);
+        int node_status[3] = {1, 1, 0};
+        reconstructQ(Q, node_status, p_rank);
     }
     else if (p_col == 1) {
-        int node_status[3] = {1, 0, 1};
-        reconstructQ(Q, Gv_tilde, node_status, p_rank, proc_cols, proc_rows, max_fails, loc_cols, loc_rows);
-    }
-
-    if(p_rank == MASTER) {
-        printf("Recon A1:\n");
-        printMatrix(Q, glob_cols, glob_rows);
-
-        printf("Recon A2:\n");
-        printMatrix(Q + (glob_cols * glob_rows), glob_cols, check_rows);
+        genFail(Q, 1, p_rank, loc_cols, loc_rows);
+        int node_status[3] = {0, 1, 1};
+        reconstructQ(Q, node_status, p_rank);
     }
     
     /************************ PBMGS **********************************/
