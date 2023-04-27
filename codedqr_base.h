@@ -34,7 +34,7 @@ MPI_Comm glob_comm, row_comm, col_comm;
 MPI_Group row_group, col_group;
 
 struct ReconInfo {
-    double* Gv_tilde;
+    double* Gv_tilde, *Gh_tilde;
     int p_rank, proc_cols, proc_rows, 
         max_fails, loc_cols, loc_rows;
 };
@@ -45,13 +45,15 @@ void printMatrix(double* matrix, int cols, int rows);
 
 void iprintMatrix(int* matrix, int cols, int rows);
 
+void randMatrixR(double* A, int n, int m, int rowsize);
+
 void randMatrix(double* A, int n, int m);
 
 double checkError(double* A, double* Q, double* R, double* E, 
     int loc_cols, int loc_rows, int glob_cols, int glob_rows);
 
 void scatterA(double* A, double* Q, int p_rank, 
-    int proc_cols, int proc_rows, int loc_cols, int loc_rows);
+    int proc_cols, int proc_rows, int loc_cols, int loc_rows, int max_fails);
 
 void gatherA(double** A,  int p_rank, int proc_cols, 
     int proc_rows, int loc_cols, int loc_rows);
@@ -60,11 +62,15 @@ void constructGv(double* Gv, int proc_rows, int f);
 
 void constructGh(double* Gh, int proc_cols, int f);
 
-void checksumQ(double *Q, int p_rank);
+void checksumV(double *Q, int p_rank);
 
-void genFail(double* Q, int target_rank, int p_rank, int loc_cols, int loc_rows);
+void checksumH(double *Q, int p_rank);
+
+void genFail(double* Q, double* R, int target_rank, int p_rank, int loc_cols, int loc_rows);
 
 void reconstructQ(double* Q, int* node_status, int p_rank);
+
+void reconstructR(double* R, int* node_status, int p_rank);
 
 void pbmgs(double* Q, double* R, int p_rank, 
     int proc_cols, int proc_rows, int loc_cols, int loc_rows);

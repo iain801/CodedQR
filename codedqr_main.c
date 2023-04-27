@@ -5,6 +5,7 @@
  *      np = (From MPI) number of processes/submatrices
  *      n = global matrix dimension (n x n matrix) 
  *      l = local matrix dimension (l x l matrices)
+ *      f = maximum tolerable faults (f <= sqrt(np)/2)
  *
  * NOTE: Fault-Tolerance tested on Intel MPI 2021.5
  * Iain Weissburg 2023
@@ -27,7 +28,7 @@ int main(int argc, char** argv) {
             *Gv_tilde,          /* Q Factor generator matrix */
             *Gh_tilde;          /* R Factor generator matrix */
 
-    double  t1, t2, t3, t4,     /* timer */
+    double  t1, t2, t3, t4, t5, /* timer */
             error_norm,         /* norm of error matrix */
             *E;                 /* error matrix */
     
@@ -37,18 +38,23 @@ int main(int argc, char** argv) {
     MPI_Init (&argc, &argv);
     MPI_Comm_dup(MPI_COMM_WORLD, &glob_comm);
 
+    /* Start timer*/
+    t1 = MPI_Wtime();
+
     MPI_Comm_size(glob_comm, &proc_size);
     MPI_Comm_rank(glob_comm, &p_rank);  
 
-    proc_cols = (int) sqrt(proc_size);
-    proc_rows = proc_size / proc_cols;
-    max_fails = proc_rows - proc_cols;
-
     glob_cols = glob_rows = atoi(argv[1]);
     loc_cols = loc_rows = atoi(argv[2]);
-    check_cols = 0;
-    check_rows = loc_rows * max_fails;
+    max_fails = atoi(argv[3]);
 
+    
+    proc_cols = glob_cols / loc_cols + max_fails;
+    proc_rows = proc_size / proc_cols;
+
+    check_cols = loc_cols * max_fails;
+    check_rows = loc_rows * max_fails;
+    
     p_col = p_rank % proc_cols;
     p_row = p_rank / proc_cols;
 
@@ -61,17 +67,17 @@ int main(int argc, char** argv) {
 
     if (p_rank == MASTER)
     {
-        A = (double*) calloc(glob_cols * (glob_rows + check_rows), sizeof(double));
+        A = (double*) calloc((glob_cols + check_cols) * (glob_rows + check_rows), sizeof(double));
         printf("codedqr_on_sq has started with %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
         printf("Each process has %d rows and %d columns\n\n", loc_rows, loc_cols);
 
         /* Generate random matrix */
         if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, SET_SEED);
         else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
-        randMatrix(A, glob_cols, glob_rows);
-        if(DEBUG) {
+        randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
+        if(1) {
             printf("Initializing array A: \n");
-            printMatrix(A, glob_cols, glob_rows);
+            printMatrix(A, glob_cols + check_cols, glob_rows + check_rows);
         }
     }
 
@@ -80,31 +86,13 @@ int main(int argc, char** argv) {
     Q = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     R = (double*) calloc(loc_cols * loc_rows, sizeof(double));
     
-    scatterA(A, Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+    scatterA(A, Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);
 
     if (p_rank == MASTER) free(A);
     A = (double*) calloc(loc_cols * loc_rows, sizeof(double));
-    
-    /* Start timer*/
-    t1 = MPI_Wtime();
-
-    /******** Build Checksum Generator Matrices **********************/
-    
-    Gv_tilde = (double*) calloc((proc_rows - max_fails) * max_fails, sizeof(double));
-    Gh_tilde = (double*) calloc(max_fails * (proc_cols - max_fails), sizeof(double));
-
-    /* Construct Gv and Gh in master node */
-    if (p_rank == MASTER)
-        constructGv(Gv_tilde, proc_rows, max_fails);
-        // constructGh(Gh_tilde, proc_cols, max_fails);
-
-    /* Broadcast Gv and Gh from master node */
-    MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm);
-    MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
 
     /***************** Setup recon_inf Struct ************************/
 
-    recon_inf.Gv_tilde = Gv_tilde;
     recon_inf.loc_cols = loc_cols;
     recon_inf.loc_rows = loc_rows;
     recon_inf.max_fails = max_fails;
@@ -112,36 +100,82 @@ int main(int argc, char** argv) {
     recon_inf.proc_cols = proc_cols;
     recon_inf.proc_rows = proc_rows;
 
-    /******************* Q-Factor Checksums **************************/
-    
-    checksumQ(Q, p_rank);
-
     /******************* R-Factor Checksums **************************/
+
+    Gh_tilde = (double*) calloc(max_fails * (proc_cols - max_fails), sizeof(double));
+    recon_inf.Gh_tilde = Gh_tilde;
+
+    /* Construct Gh in master node and broadcast */
+    if (p_rank == MASTER)
+        constructGh(Gh_tilde, proc_cols, max_fails);
+
+    MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
+
+    checksumH(Q, p_rank);    
+
+    glob_cols += max_fails * loc_cols;
+
+    /******************* Q-Factor Checksums **************************/
+
+    Gv_tilde = (double*) calloc((proc_rows - max_fails) * max_fails, sizeof(double));
+    recon_inf.Gv_tilde = Gv_tilde;
+
+    /* Construct Gv in master node and broadcast */
+    if (p_rank == MASTER)
+        constructGv(Gv_tilde, proc_cols, max_fails);
+
+    MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm);    
+
+    checksumV(Q, p_rank);
 
     /****************** Copy A to Local Parts ************************/
     
-    t1 += MPI_Wtime();
     LAPACKE_dlacpy(CblasRowMajor,'A', loc_rows, loc_cols, Q, loc_cols, A, loc_cols);
-    t1 -= MPI_Wtime();
-
-    /******************** Test Reconstruction ************************/
-
-    // genFail(Q, 0, p_rank, loc_cols, loc_rows);
-    // genFail(Q, 1, p_rank, loc_cols, loc_rows);
-    // genFail(Q, 2, p_rank, loc_cols, loc_rows);
-    genFail(Q, 3, p_rank, loc_cols, loc_rows);
-    genFail(Q, 4, p_rank, loc_cols, loc_rows);
-    genFail(Q, 5, p_rank, loc_cols, loc_rows);
-    // genFail(Q, 9, p_rank, loc_cols, loc_rows);
-    // genFail(Q, 10, p_rank, loc_cols, loc_rows);
-    // genFail(Q, 11, p_rank, loc_cols, loc_rows);
-
-    int node_status[5] = {1, 0, 1, 1, 1};
-    reconstructQ(Q, node_status, p_rank);
     
     /************************ PBMGS **********************************/
     
     pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+
+    /******************** Test Reconstruction ************************/
+    t3 = MPI_Wtime();
+    genFail(Q, R, 6, p_rank, loc_cols, loc_rows);
+    genFail(Q, R, 8, p_rank, loc_cols, loc_rows);
+    genFail(Q, R, 12, p_rank, loc_cols, loc_rows);
+
+    int *row_status = (int*) malloc(proc_rows * sizeof(int));
+    int *col_status = (int*) malloc(proc_rows * sizeof(int));
+
+    /* NOTE: Assuming proc_rows = proc_cols */
+    for (int i=0;i<proc_rows;++i) {
+        col_status[i] = 1;
+        row_status[i] = 1;
+    }
+    if (p_row == 1) {
+        row_status[0] = 0;
+        row_status[2] = 0;
+    }
+    if (p_col == 0) {
+        col_status[1] = 0;
+        col_status[2] = 0;
+    }
+    if (p_col == 2) {
+        col_status[1] = 0;
+    }
+    if (p_row == 2) {
+        row_status[0] = 0;
+    }
+
+    reconstructR(R, row_status, p_rank);
+    reconstructQ(Q, col_status, p_rank);
+
+    t4 = MPI_Wtime() - t3;   
+
+    /* Take average checking time */
+    {
+    double exec_time;
+    MPI_Reduce(&t4, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t5 = exec_time / proc_size;
+    }   
 
     /***************** Get average timing ****************************/
 
@@ -159,11 +193,11 @@ int main(int argc, char** argv) {
 
     E = (double*) calloc(loc_cols * loc_rows, sizeof(double));
 
-    t3 = MPI_Wtime();
+    t1 = MPI_Wtime();
     
     error_norm = checkError(A, Q, R, E, loc_cols, loc_rows, glob_cols + check_cols, glob_rows + check_rows);  
     
-    t4 = MPI_Wtime() - t3;   
+    t4 = MPI_Wtime() - t1;   
 
     /* Take average checking time */
     {
@@ -184,30 +218,22 @@ int main(int argc, char** argv) {
         /* Print all matrices */
         if (glob_cols < 100 && glob_rows < 100) {
             printf("\n");
-            printf("Matrix A1:\n");
-            printMatrix(A, glob_cols, glob_rows);
+            printf("Matrix A:\n");
+            printMatrix(A, glob_cols, glob_rows + check_rows);
 
-            printf("Matrix A2:\n");
-            printMatrix(A + (glob_cols * glob_rows), glob_cols, check_rows);
+            printf("Matrix B:\n");
+            printMatrix(E, glob_cols, glob_rows + check_rows);
 
-            printf("Matrix B1:\n");
-            printMatrix(E, glob_cols, glob_rows);
-
-            printf("Matrix B2:\n");
-            printMatrix(E + (glob_cols * glob_rows), glob_cols, check_rows);
-
-            printf("Matrix Q1:\n");
-            printMatrix(Q, glob_cols, glob_rows);
-
-            printf("Matrix Q2:\n");
-            printMatrix(Q + (glob_cols * glob_rows), glob_cols, check_rows);
+            printf("Matrix Q:\n");
+            printMatrix(Q, glob_cols, glob_rows + check_rows);
 
             printf("Matrix R:\n");
-            printMatrix(R, glob_cols, glob_rows);
+            printMatrix(R, glob_cols, glob_rows + check_rows);
         }
     
         /* Print Stats */
         printf("Execution Time: %.5f s\n", t2);
+        printf("Recovery Time: %.5f s\n", t5);
         printf("Checking Time: %.5f s\n", t4);
         printf("Roundoff Error: %f\n", error_norm); 
     }
