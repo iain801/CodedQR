@@ -150,6 +150,7 @@ int main(int argc, char** argv) {
         col_status[i] = 1;
         row_status[i] = 1;
     }
+
     if (p_row == 1) {
         row_status[0] = 0;
         row_status[2] = 0;

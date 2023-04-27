@@ -234,8 +234,8 @@ void checksumH(double *Q, int p_rank) {
             LAPACKE_dlacpy(CblasRowMajor, 'A', recon_inf.loc_rows, recon_inf.loc_cols, Q, 
                 recon_inf.loc_cols, Q_bar, recon_inf.loc_cols);
 
-            /* Mult Qbar by corrosponding Gv_tilde term*/
-            cblas_dscal(recon_inf.loc_cols * recon_inf.loc_rows, recon_inf.Gh_tilde[j * (recon_inf.proc_cols - recon_inf.max_fails) + p_col], Q_bar, 1);
+            /* Mult Qbar by corrosponding Gh_tilde term*/
+            cblas_dscal(recon_inf.loc_cols * recon_inf.loc_rows, recon_inf.Gh_tilde[p_col * recon_inf.max_fails + j], Q_bar, 1);
 
             MPI_Reduce(Q_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
                 MPI_SUM, j + recon_inf.proc_cols - recon_inf.max_fails, row_comm);
@@ -411,6 +411,8 @@ void reconstructR(double* R, int* node_status, int p_rank) {
             }
         }
 
+        if (p_rank == 7) {printMatrix(recon_inf.Gh_tilde, recon_inf.max_fails, m); printMatrix(Gh_succ, n, m);}
+
         /* Take inverse of success matrix */
         int* ipiv = (int*) malloc (n * sizeof(int));
         LAPACKE_dgetrf(LAPACK_ROW_MAJOR, n, m, Gh_succ, m, ipiv);
@@ -428,7 +430,7 @@ void reconstructR(double* R, int* node_status, int p_rank) {
                         recon_inf.loc_cols, R_bar, recon_inf.loc_cols);
 
                     /* Mult Qbar by corrosponding Gv_succ term*/
-                    cblas_dscal(recon_inf.loc_rows * recon_inf.loc_cols, Gh_succ[m * first_n_nodes_i[p_col] + i], R_bar, 1);
+                    cblas_dscal(recon_inf.loc_rows * recon_inf.loc_cols, Gh_succ[n * first_n_nodes_i[p_col] + i], R_bar, 1);
                 } 
                 MPI_Reduce(R_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, MPI_SUM, i, row_comm); 
                 for (j=recon_inf.loc_cols * recon_inf.loc_rows-1; j >=0; --j) { R_bar[j] = 0; }
