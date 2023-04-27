@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
         if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, SET_SEED);
         else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
         randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
-        if(1) {
+        if(DEBUG) {
             printf("Initializing array A: \n");
             printMatrix(A, glob_cols + check_cols, glob_rows + check_rows);
         }
@@ -138,9 +138,9 @@ int main(int argc, char** argv) {
 
     /******************** Test Reconstruction ************************/
     t3 = MPI_Wtime();
-    genFail(Q, R, 6, p_rank, loc_cols, loc_rows);
-    genFail(Q, R, 8, p_rank, loc_cols, loc_rows);
-    genFail(Q, R, 12, p_rank, loc_cols, loc_rows);
+    genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
+    genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
+    genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
 
     int *row_status = (int*) malloc(proc_rows * sizeof(int));
     int *col_status = (int*) malloc(proc_rows * sizeof(int));
@@ -222,8 +222,10 @@ int main(int argc, char** argv) {
             printf("Matrix A:\n");
             printMatrix(A, glob_cols, glob_rows + check_rows);
 
-            printf("Matrix B:\n");
-            printMatrix(E, glob_cols, glob_rows + check_rows);
+            if (fabs(error_norm) > 1e-9) {
+                printf("Matrix B:\n");
+                printMatrix(E, glob_cols, glob_rows + check_rows);
+            }
 
             printf("Matrix Q:\n");
             printMatrix(Q, glob_cols, glob_rows + check_rows);
@@ -233,10 +235,10 @@ int main(int argc, char** argv) {
         }
     
         /* Print Stats */
-        printf("Execution Time: %.5f s\n", t2);
-        printf("Recovery Time: %.5f s\n", t5);
-        printf("Checking Time: %.5f s\n", t4);
-        printf("Roundoff Error: %f\n", error_norm); 
+        printf("Execution Time: %.3g s\n", t2);
+        printf("Recovery Time: %.3g s\n", t5);
+        printf("Checking Time: %.3g s\n", t4);
+        printf("Roundoff Error: %.5g\n", error_norm); 
     }
 
     if(p_rank == MASTER) printf("\n\n");

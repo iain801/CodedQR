@@ -411,8 +411,6 @@ void reconstructR(double* R, int* node_status, int p_rank) {
             }
         }
 
-        if (p_rank == 7) {printMatrix(recon_inf.Gh_tilde, recon_inf.max_fails, m); printMatrix(Gh_succ, n, m);}
-
         /* Take inverse of success matrix */
         int* ipiv = (int*) malloc (n * sizeof(int));
         LAPACKE_dgetrf(LAPACK_ROW_MAJOR, n, m, Gh_succ, m, ipiv);
