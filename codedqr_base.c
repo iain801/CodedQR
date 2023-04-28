@@ -591,3 +591,80 @@ void pbmgs(double* Q, double* R, int p_rank,
         }
     }
 }
+
+/* finds matrix Q^T = (G0Q1)^T * G0 
+    outputs Q^T into Q */
+void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank, 
+    int proc_cols, int proc_rows, int loc_cols, int loc_rows, int max_fails) {
+    
+    int i, j, k;
+    int p_col = p_rank % proc_cols;
+    int p_row = p_rank / proc_cols;
+    int m = proc_rows - max_fails;
+    int n = proc_cols - max_fails;
+    int is_check = p_col / n + p_row / m;
+    int reg_rank;
+    
+    /* Split communicators for regular and checksum nodes */
+    MPI_Comm reg_comm, reg_col, reg_row;
+    MPI_Comm_split(glob_comm, is_check, p_rank, &reg_comm);
+    MPI_Comm_split(reg_comm, p_col, p_row, &reg_col);
+    MPI_Comm_split(reg_comm, p_row, p_col, &reg_row);
+    MPI_Comm_rank(reg_comm, &reg_rank);
+    
+    double* G0 = (double*) calloc(n * m, sizeof(double));
+    
+    /* Copy Gv into G0 */
+    cblas_dcopy(n * max_fails, Gv_tilde, 1, G0, 1);
+
+    /* Copy V^T from Gv into G0 */
+    mkl_domatcopy2('R', 'T', max_fails, n - max_fails, 1, Gv_tilde + max_fails, n, 1,
+        G0 + n * max_fails, n, 1);
+
+    /* Identity matrix addition/subtraction */
+    for(i=0; i < max_fails; ++i) {
+        G0[i*n+i] += 1;
+    }
+    for(; i < n; ++i) {
+        G0[i*n+i] -= 1;
+    }
+    
+    /* Perform operation if regular node 
+        operation (G0Q1)^T G0 */
+    if (!is_check) {
+
+        double* Q_bar = (double*) calloc(loc_cols * loc_rows, sizeof(double));
+        double* Q_res = (double*) calloc(loc_cols * loc_rows, sizeof(double));
+        
+        /* Perform G0Q1 */
+        for (i=0; i < m; ++i) {
+            LAPACKE_dlacpy(CblasRowMajor, 'A', loc_rows, loc_cols, 
+                Q, loc_cols, Q_bar, loc_cols);
+
+            cblas_dscal(loc_cols * loc_rows, G0[i * n + p_row], Q_bar, 1);
+
+            MPI_Reduce(Q_bar, Q_res, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, reg_col);
+        }
+        
+        /* Transpose Q_res*/
+        if(p_row != p_col) { 
+            /* Distributed transpose */
+            int target_rank = p_col * n + p_row;
+            MPI_Sendrecv_replace(Q_res, loc_cols * loc_rows, MPI_DOUBLE, 
+                target_rank, 0, target_rank, 0, reg_comm, MPI_STATUS_IGNORE);
+        }
+        
+        /* Local transpose */
+        mkl_dimatcopy('R', 'T', loc_rows, loc_cols, 1, Q_res, loc_cols, loc_rows);
+
+        /* Q_res G0 */
+        for (i=0; i < n; ++i) {
+            LAPACKE_dlacpy(CblasRowMajor, 'A', loc_rows, loc_cols, 
+                Q_res, loc_cols, Q_bar, loc_cols);
+
+            cblas_dscal(loc_cols * loc_rows, G0[p_col * n + i], Q_bar, 1);
+
+            MPI_Reduce(Q_bar, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, reg_row);
+        }
+    }
+}

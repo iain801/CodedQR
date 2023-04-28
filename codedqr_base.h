@@ -75,4 +75,7 @@ void reconstructR(double* R, int* node_status, int p_rank);
 void pbmgs(double* Q, double* R, int p_rank, 
     int proc_cols, int proc_rows, int loc_cols, int loc_rows);
 
+void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank, 
+    int proc_cols, int proc_rows, int loc_cols, int loc_rows, int max_fails);
+
 #endif // CODEDQR_H

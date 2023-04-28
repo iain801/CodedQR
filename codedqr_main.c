@@ -30,6 +30,7 @@ int main(int argc, char** argv) {
 
     double  t1, t2, t3, t4, t5, /* timer */
             error_norm,         /* norm of error matrix */
+            *X, *B,             /* linear system results */
             *E;                 /* error matrix */
     
 
@@ -75,6 +76,7 @@ int main(int argc, char** argv) {
         if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, SET_SEED);
         else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
         randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
+
         if(DEBUG) {
             printf("Initializing array A: \n");
             printMatrix(A, glob_cols + check_cols, glob_rows + check_rows);
@@ -138,9 +140,13 @@ int main(int argc, char** argv) {
 
     /******************** Test Reconstruction ************************/
     t3 = MPI_Wtime();
-    genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
-    genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
-    genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
+    
+    if(max_fails > 0) 
+        genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
+    if(max_fails > 1) {
+        genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
+        genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
+    }
 
     int *row_status = (int*) malloc(proc_rows * sizeof(int));
     int *col_status = (int*) malloc(proc_rows * sizeof(int));
@@ -151,18 +157,18 @@ int main(int argc, char** argv) {
         row_status[i] = 1;
     }
 
-    if (p_row == 1) {
+    if (max_fails > 0 && p_row == 1) {
         row_status[0] = 0;
-        row_status[2] = 0;
+        if(max_fails > 1) row_status[2] = 0;
     }
-    if (p_col == 0) {
+    if (max_fails > 0 && p_col == 0) {
         col_status[1] = 0;
-        col_status[2] = 0;
+        if(max_fails > 1) col_status[2] = 0;
     }
-    if (p_col == 2) {
+    if (max_fails > 1 && p_col == 2) {
         col_status[1] = 0;
     }
-    if (p_row == 2) {
+    if (max_fails > 1 && p_row == 2) {
         row_status[0] = 0;
     }
 
@@ -190,7 +196,7 @@ int main(int argc, char** argv) {
     t2 = exec_time / proc_size;
     }
 
-    /********************* Check Results *****************************/
+    /****************** Check Results of QR **************************/
 
     E = (double*) calloc(loc_cols * loc_rows, sizeof(double));
 
@@ -205,7 +211,9 @@ int main(int argc, char** argv) {
     double exec_time;
     MPI_Reduce(&t4, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
     t4 = exec_time / proc_size;
-    }     
+    }
+
+    postOrthogonalize(Q, Gv_tilde, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);     
         
     /*********** Compile Q and R from local blocks *******************/
 
@@ -214,7 +222,14 @@ int main(int argc, char** argv) {
     gatherA(&R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
     gatherA(&E, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
 
+    /******************* Solve linear system *************************/
     if (p_rank == MASTER) {
+        int nrhs = 1;
+        B = (double*) malloc(glob_rows * nrhs * sizeof(double));
+        X = (double*) malloc(glob_rows * nrhs * sizeof(double));
+        randMatrix(B, glob_rows, nrhs);
+        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
+        LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
 
         /* Print all matrices */
         if (glob_cols < 100 && glob_rows < 100) {
@@ -232,6 +247,12 @@ int main(int argc, char** argv) {
 
             printf("Matrix R:\n");
             printMatrix(R, glob_cols, glob_rows + check_rows);
+
+            printf("Matrix B:\n");
+            printMatrix(B, nrhs, glob_rows);
+
+            printf("Matrix X:\n");
+            printMatrix(X, nrhs, glob_rows);
         }
     
         /* Print Stats */
