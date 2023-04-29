@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
             *X, *B,             /* linear system results */
             *E;                 /* error matrix */
     
-
+    int nrhs = 1;
     /*********************** Initialize MPI *****************************/
 
     MPI_Init (&argc, &argv);
@@ -76,6 +76,9 @@ int main(int argc, char** argv) {
         if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, SET_SEED);
         else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
         randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
+
+        B = (double*) malloc(glob_rows * nrhs * sizeof(double));
+        randMatrix(B, glob_rows, nrhs);
 
         if(DEBUG) {
             printf("Initializing array A: \n");
@@ -224,10 +227,7 @@ int main(int argc, char** argv) {
 
     /******************* Solve linear system *************************/
     if (p_rank == MASTER) {
-        int nrhs = 1;
-        B = (double*) malloc(glob_rows * nrhs * sizeof(double));
         X = (double*) malloc(glob_rows * nrhs * sizeof(double));
-        randMatrix(B, glob_rows, nrhs);
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
         LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
 
