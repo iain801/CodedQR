@@ -636,7 +636,7 @@ void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank,
         double* Q_bar = (double*) calloc(loc_cols * loc_rows, sizeof(double));
         double* Q_res = (double*) calloc(loc_cols * loc_rows, sizeof(double));
         
-        /* Perform G0Q1 */
+        /* Perform Q_res = G0 * Q1 */
         for (i=0; i < m; ++i) {
             LAPACKE_dlacpy(CblasRowMajor, 'A', loc_rows, loc_cols, 
                 Q, loc_cols, Q_bar, loc_cols);
@@ -657,7 +657,7 @@ void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank,
         /* Local transpose */
         mkl_dimatcopy('R', 'T', loc_rows, loc_cols, 1, Q_res, loc_cols, loc_rows);
 
-        /* Q_res G0 */
+        /* Q_res * G0 */
         for (i=0; i < n; ++i) {
             LAPACKE_dlacpy(CblasRowMajor, 'A', loc_rows, loc_cols, 
                 Q_res, loc_cols, Q_bar, loc_cols);

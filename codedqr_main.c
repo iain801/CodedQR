@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
             *Gv_tilde,          /* Q Factor generator matrix */
             *Gh_tilde;          /* R Factor generator matrix */
 
-    double  t1, t2, t3, t4, t5, /* timer */
+    double  t1, t2, t3, t4, t5, t6, /* timer */
             error_norm,         /* norm of error matrix */
             *X, *B,             /* linear system results */
             *E;                 /* error matrix */
@@ -38,9 +38,6 @@ int main(int argc, char** argv) {
 
     MPI_Init (&argc, &argv);
     MPI_Comm_dup(MPI_COMM_WORLD, &glob_comm);
-
-    /* Start timer*/
-    t1 = MPI_Wtime();
 
     MPI_Comm_size(glob_comm, &proc_size);
     MPI_Comm_rank(glob_comm, &p_rank);  
@@ -96,6 +93,9 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER) free(A);
     A = (double*) calloc(loc_cols * loc_rows, sizeof(double));
 
+    /* Start timer*/
+    t1 = MPI_Wtime();
+
     /***************** Setup recon_inf Struct ************************/
 
     recon_inf.loc_cols = loc_cols;
@@ -133,14 +133,36 @@ int main(int argc, char** argv) {
 
     checksumV(Q, p_rank);
 
+    /* End timer */
+    t6 = MPI_Wtime() - t1;    
+
+    /* Take average execution time */
+    {
+    double exec_time;
+    MPI_Reduce(&t6, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t6 = exec_time / proc_size;
+    }
+
     /****************** Copy A to Local Parts ************************/
     
     LAPACKE_dlacpy(CblasRowMajor,'A', loc_rows, loc_cols, Q, loc_cols, A, loc_cols);
     
     /************************ PBMGS **********************************/
     
+    t1 = MPI_Wtime();
+
     pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
 
+    /* End timer */
+    t2 = MPI_Wtime() - t1;    
+
+    /* Take average execution time */
+    {
+    double exec_time;
+    MPI_Reduce(&t2, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t2 = exec_time / proc_size;
+    }
+    
     /******************** Test Reconstruction ************************/
     t3 = MPI_Wtime();
     
@@ -178,26 +200,14 @@ int main(int argc, char** argv) {
     reconstructR(R, row_status, p_rank);
     reconstructQ(Q, col_status, p_rank);
 
-    t4 = MPI_Wtime() - t3;   
+    t5 = MPI_Wtime() - t3;   
 
-    /* Take average checking time */
+    /* Take average recovery time */
     {
     double exec_time;
-    MPI_Reduce(&t4, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    MPI_Reduce(&t5, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
     t5 = exec_time / proc_size;
     }   
-
-    /***************** Get average timing ****************************/
-
-    /* End timer */
-    t2 = MPI_Wtime() - t1;    
-
-    /* Take average execution time */
-    {
-    double exec_time;
-    MPI_Reduce(&t2, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
-    t2 = exec_time / proc_size;
-    }
 
     /****************** Check Results of QR **************************/
 
@@ -205,8 +215,8 @@ int main(int argc, char** argv) {
 
     t1 = MPI_Wtime();
     
-    error_norm = checkError(A, Q, R, E, loc_cols, loc_rows, glob_cols + check_cols, glob_rows + check_rows);  
-    
+    error_norm = checkError(A, Q, R, E, loc_cols, loc_rows, glob_cols, glob_rows + check_rows);  
+
     t4 = MPI_Wtime() - t1;   
 
     /* Take average checking time */
@@ -215,8 +225,18 @@ int main(int argc, char** argv) {
     MPI_Reduce(&t4, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
     t4 = exec_time / proc_size;
     }
+    
+    t1 = MPI_Wtime();
+    postOrthogonalize(Q, Gv_tilde, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);   
+    t3 = MPI_Wtime() - t1;   
 
-    postOrthogonalize(Q, Gv_tilde, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);     
+    /* Take average checking time */
+    {
+    double exec_time;
+    MPI_Reduce(&t3, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t3 = exec_time / proc_size;
+    }  
+
         
     /*********** Compile Q and R from local blocks *******************/
 
@@ -227,9 +247,11 @@ int main(int argc, char** argv) {
 
     /******************* Solve linear system *************************/
     if (p_rank == MASTER) {
+        t1 = MPI_Wtime();
         X = (double*) malloc(glob_rows * nrhs * sizeof(double));
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
         LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
+        t1 = MPI_Wtime() - t1;
 
         /* Print all matrices */
         if (glob_cols < 100 && glob_rows < 100) {
@@ -256,9 +278,12 @@ int main(int argc, char** argv) {
         }
     
         /* Print Stats */
-        printf("Execution Time: %.3g s\n", t2);
-        printf("Recovery Time: %.3g s\n", t5);
-        printf("Checking Time: %.3g s\n", t4);
+        printf("CS Construct Time: %.3g s\n", t6);
+        printf("PBMGS Time: %.3g s\n", t2);
+        printf("Node Recovery Time: %.3g s\n", t5);
+        printf("QR Checking Time: %.3g s\n", t4);
+        printf("Post-Ortho Time: %.3g s\n", t3);
+        printf("Serial Solve Time: %.3g s\n", t1);
         printf("Roundoff Error: %.5g\n", error_norm); 
     }
 
