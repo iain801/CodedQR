@@ -27,7 +27,7 @@
 #define COMP_R 3        /* code for mpi send/recv */
 
 #define DEBUG 0         /* run in debug mode */
-#define SET_SEED 42     /* choose random seed, time-based if 0 */
+#define SET_SEED 0      /* choose random seed, time-based if 0 */
 
 VSLStreamStatePtr stream;
 MPI_Comm glob_comm, row_comm, col_comm;
