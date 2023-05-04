@@ -291,8 +291,8 @@ int main(int argc, char** argv) {
         char fname[30];
         sprintf(fname, "codedqr-test.csv");
         FILE *log = fopen(fname,"a");
-        fprintf(log, "%d, %d, %d, %.8g, %.8g, %.8g, %.8g, %.8g, %.8g, %.8g\n", 
-            proc_rows, glob_rows, max_fails, t6, t2, t5, t4, t3, t1, error_norm);
+        fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
+            proc_rows, glob_rows, max_fails, t5, t1, t3, t6, t2);
         fclose(log);
 
         mkl_free(B);
