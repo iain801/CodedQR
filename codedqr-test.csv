@@ -1,1 +1,1 @@
-p, n,    f, cs gen,    pbgms,     recov,       qr check,  p-ortho,  fin solve,  fp err
+p,n,f,recovery,final solve,post-ortho,cs construct,pbmgs*10^-2
