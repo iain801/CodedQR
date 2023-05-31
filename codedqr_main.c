@@ -6,10 +6,13 @@
  *      n = global matrix dimension (n x n matrix) 
  *      l = local matrix dimension (l x l matrices)
  *      f = maximum tolerable faults (f <= sqrt(np)/2)
+ *      log = filename of timing output log (OPTIONAL)
  *
  * NOTE: Fault-Tolerance tested on Intel MPI 2021.5
  * Iain Weissburg 2023
  */
+
+// TODO: Add 0-padding around matrix
 
 #include "codedqr_base.h"
 
@@ -65,7 +68,7 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER)
     {
         A = mkl_calloc((glob_cols + check_cols) * (glob_rows + check_rows), sizeof(double), 16);
-        printf("mpirun -np %d ./out/codedqr_main %d %d %d\n", proc_size, atoi(argv[1]), atoi(argv[2]), atoi(argv[3]));
+        printf("mpirun -np %d ./out/codedqr_main %d %d %d\n", proc_size, glob_cols, loc_cols, max_fails);
         printf("There are %d tasks in %d rows and %d columns\n\n", proc_size, proc_rows, proc_cols);
 
         /* Generate random matrix */
@@ -115,7 +118,9 @@ int main(int argc, char** argv) {
 
     MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
 
-    checksumH(Q, p_rank);    
+    if(p_row < proc_rows - max_fails) {
+        checksumH(Q, p_rank);  
+    }  
 
     glob_cols += max_fails * loc_cols;
 
@@ -128,7 +133,7 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER)
         constructGv(Gv_tilde, proc_cols, max_fails);
 
-    MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm);    
+    MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm); 
 
     checksumV(Q, p_rank);
 
@@ -261,7 +266,7 @@ int main(int argc, char** argv) {
             printf("Matrix A:\n");
             printMatrix(A, glob_cols, glob_rows + check_rows);
 
-            if (fabs(error_norm) > 1e-9) {
+            if (fabs(error_norm) > 1e-4) {
                 printf("Matrix B:\n");
                 printMatrix(E, glob_cols, glob_rows + check_rows);
             }
@@ -288,15 +293,23 @@ int main(int argc, char** argv) {
         printf("Serial Solve Time: %.3g s\n", t1);
         printf("Roundoff Error: %.5g\n", error_norm); 
 
+        if (error_norm > 1e-4) 
+            printf("WARNING: HIGH ERROR \n");
+
         char fname[30];
-        sprintf(fname, "codedqr-test.csv");
+        if (argc == 5)
+            sprintf(fname, argv[4]);
+        else
+            sprintf(fname, "codedqr-test.csv");
+
         FILE *log = fopen(fname,"a");
         fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
-            proc_rows, glob_rows, max_fails, t5, t1, t3, t6, t2);
+            proc_rows-max_fails, glob_rows, max_fails, t5, t1, t3, t6, t2);
         fclose(log);
 
         mkl_free(B);
         mkl_free(X);
+        printf("\n\n");
     }
 
     mkl_free(Gv_tilde);
@@ -306,13 +319,12 @@ int main(int argc, char** argv) {
     mkl_free(R);
     mkl_free(E);
 
-    if(p_rank == MASTER) printf("\n\n");
-
     MPI_Comm_free(&glob_comm);
     MPI_Comm_free(&row_comm);
     MPI_Comm_free(&col_comm);
     MPI_Group_free(&row_group);
     MPI_Group_free(&col_group);
 
+    mkl_free_buffers();
     MPI_Finalize();
 }

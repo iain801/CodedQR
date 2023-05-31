@@ -5,46 +5,128 @@ from matplotlib.backends.backend_pdf import PdfPages
 # load csv file into a pandas dataframe
 df = pd.read_csv('codedqr-test.csv')
 
-df['pbmgs*10^-2'] = [d * 1e-2 for d in df['pbmgs*10^-2']]
+df['total'] = df.iloc[:, 3:].sum(axis=1)
+
+df = df[['n', 'p', 'f', 'recovery','final solve','post-ortho','cs construct','pbmgs','total']]
+
+df['p'] = df['p'] - df['f']
+
+seconds = int(df['total'].sum())
+mins = seconds // 60
+hours = mins // 60
+days = hours // 24
+seconds %= 60
+mins %= 60
+hours %= 24
+
+print(f'total time: {days}-{hours}:{mins}:{seconds}')
+
+alpha = 5e1
+gamma = 2e-2
+
+df['encode'] = df['cs construct'] / df['pbmgs']
+df['post'] = df['post-ortho'] / df['pbmgs']
+df['decode'] = df['recovery'] / df['pbmgs']
+df['f/p'] = gamma * df['f'] / df['p']
+df['f/n'] = alpha * df['f'] / df['n']
 
 # create a PDF file to save the plots
 pdf_file = 'timing-plots.pdf'
 pdf_pages = PdfPages(pdf_file)
 
 # Get a list of the configuration variables
-config_cols = ['p', 'n', 'f']
+config_cols = ['n', 'p', 'f']
 
-# Loop through the configuration variables and create a stacked bar chart for each one
-for col in config_cols:
-    # Group the data by all configuration variables except for the current one
-    group_cols = [c for c in config_cols if c != col]
-    grouped_means = df.groupby(group_cols)[df.columns[3:]].mean()
+df_means = df.groupby(config_cols)[df.columns[3:]].mean()
+df_std = df.groupby(config_cols)[df.columns[3:]].std()
 
-    # Loop through each unique value of the current configuration variable
-    for val in df[col].unique():
-        # Filter the original data for the current configuration value
-        sub_df = df[df[col] == val]
+# Create the stacked bar chart for the current configuration value
+total_time = df_means.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), yerr=df_std, color=['#ef6f6c','#8963ba','#90c290'])
 
-        # Group the filtered data by the other configuration variables
-        sub_grouped_means = sub_df.groupby(group_cols)[sub_df.columns[3:]].mean()
-        sub_grouped_std = sub_df.groupby(group_cols)[sub_df.columns[3:]].std()
+# Set the title and axis labels for the plot
+total_time.set_title(f'Total Execution Time')
+total_time.set_xlabel(', '.join(config_cols))
+total_time.set_ylabel('Time (s)')
 
-        # Create the stacked bar chart for the current configuration value
-        ax = sub_grouped_means.plot(kind='bar', stacked=True, figsize=(10, 6), yerr=sub_grouped_std)
-        
-        # Set the title and axis labels for the plot
-        ax.set_title(f'Timing Data vs. {", ".join([c for c in config_cols if c != col])}, {col}={val}')
-        ax.set_xlabel(', '.join(group_cols))
-        ax.set_ylabel('Time (s)')
-        
-        # Set the y-axis limits
-        # ax.set_ylim(0, 5)
-        
-        # Set the y-axis to log scale
-        # ax.set_yscale('log')
-    
-        # Save the figure to a PDF file
-        pdf_pages.savefig()
+# Save the figure to a PDF file
+pdf_pages.savefig()
+
+# Create the stacked bar chart for the current configuration value
+overhead = df_means.plot(y=['encode', 'decode', 'post'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
+
+# Set the title and axis labels for the plot
+overhead.set_title(f'Overhead Breakdown')
+overhead.set_xlabel(', '.join(config_cols))
+overhead.set_ylabel('Proportion of  Tqr')
+
+pdf_pages.savefig()
+
+df_means = df.groupby(config_cols[1:])[df.columns[3:]].mean()
+df_std = df.groupby(config_cols[1:])[df.columns[3:]].std()
+
+# Create the stacked bar chart for the current configuration value
+total_time = df_means.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), color=['#ef6f6c','#8963ba','#90c290'])
+
+# Set the title and axis labels for the plot
+total_time.set_title(f'Total Execution Time')
+total_time.set_xlabel(', '.join(config_cols))
+total_time.set_ylabel('Time (s)')
+
+# Save the figure to a PDF file
+pdf_pages.savefig()
+
+# Create the stacked bar chart for the current configuration value
+overhead2 = df_means.plot(y=['encode', 'decode', 'post'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
+
+# Set the title and axis labels for the plot
+overhead2.set_title(f'Overhead Breakdown')
+overhead2.set_xlabel(', '.join(config_cols))
+overhead2.set_ylabel('Proportion of  Tqr')
+
+# Save the figure to a PDF file
+pdf_pages.savefig()
+
+# Create the stacked bar chart for the current configuration value
+overhead3 = df_means.plot(y=['encode', 'decode'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80'])
+
+# Set the title and axis labels for the plot
+overhead3.set_title(f'Coding Breakdown')
+overhead3.set_xlabel(', '.join(config_cols))
+overhead3.set_ylabel('Proportion of  Tqr')
+
+# Save the figure to a PDF file
+pdf_pages.savefig()
+
+# Create the stacked bar chart for the current configuration value
+overhead3 = df_means.plot(y=['cs construct'], kind='bar', stacked=True, figsize=(10, 8), color=['#916c80'])
+
+# Set the title and axis labels for the plot
+overhead3.set_title(f'Absolute Encoding')
+overhead3.set_xlabel(', '.join(config_cols))
+overhead3.set_ylabel('Time (s)')
+
+# Save the figure to a PDF file
+pdf_pages.savefig()
+
+# Create the stacked bar chart for the current configuration value
+estimate = df_means.plot(y=['f/p'], kind='bar', stacked=False, figsize=(10, 8), color=['#916c80'])
+
+# Set the title and axis labels for the plot
+estimate.set_title(f'Coding Estimates ({gamma} * f/p)')
+estimate.set_xlabel(', '.join(config_cols))
+estimate.set_ylabel('Proportion of  Tqr')
+
+pdf_pages.savefig()
+
+# Create the stacked bar chart for the current configuration value
+estimate2 = df_means.plot(y=['f/n'], kind='bar', stacked=False, figsize=(10, 8), color=['#ffc6d9'])
+
+# Set the title and axis labels for the plot
+estimate2.set_title(f'Coding Estimates ({alpha} * f/n)')
+estimate2.set_xlabel(', '.join(config_cols))
+estimate2.set_ylabel('Proportion of  Tqr')
+
+pdf_pages.savefig()
 
 # close the PDF file
 pdf_pages.close()

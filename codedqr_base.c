@@ -8,6 +8,8 @@
 #include "codedqr_base.h"
 
 void printMatrix(double* matrix, int cols, int rows) {
+    if (cols > 50 || rows > 50)
+        return;
     for (int i = 0; i < rows; ++i) {
         for (int j = 0; j < cols; ++j) {
             printf("%.3f ", matrix[i*cols + j]);
@@ -161,6 +163,8 @@ void gatherA(double** A,  int p_rank, int proc_cols,
 
 /* Actually Gv for Q-Factor protection, Construction 1 */
 void constructGv(double* Gv, int proc_rows, int f) {
+    if(f == 0) return;
+
     int i, j, k;
 
     int p_rank;
@@ -186,10 +190,12 @@ void constructGv(double* Gv, int proc_rows, int f) {
 
 /* Actually Gh for R-factor protection, random */
 void constructGh(double* Gh, int proc_cols, int f) {
+    if(f == 0) return;
     randMatrix(Gh, f, proc_cols - f);
 }
 
 void checksumV(double *Q, int p_rank) {
+    if(recon_inf.max_fails == 0) return;
     int i, j;
 
     int p_col = p_rank % recon_inf.proc_cols;
@@ -198,21 +204,22 @@ void checksumV(double *Q, int p_rank) {
     
     double* Q_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 16);
 
-    if (cs_row < 0) { //if non-checksum node
-        for (j=0; j < recon_inf.max_fails; ++j) {
-            /* Copy Q to Qbar*/
-            LAPACKE_dlacpy(CblasRowMajor, 'A', recon_inf.loc_rows, recon_inf.loc_cols, Q, 
-                recon_inf.loc_cols, Q_bar, recon_inf.loc_cols);
+    for (j=0; j < recon_inf.max_fails; ++j) {
+        if (cs_row < 0) { //if non-checksum node
 
-            /* Mult Qbar by corrosponding Gv_tilde term*/
-            cblas_dscal(recon_inf.loc_cols* recon_inf.loc_rows, recon_inf.Gv_tilde[j * (recon_inf.proc_rows - recon_inf.max_fails) + p_row], Q_bar, 1);
+            /* Copy corrosponding Gv_tilde term * Q -> Qbar*/
+            cblas_daxpby(recon_inf.loc_cols * recon_inf.loc_rows, 
+                recon_inf.Gv_tilde[j * (recon_inf.proc_rows - recon_inf.max_fails) + p_row], 
+                Q, 1, 0, Q_bar, 1);
+
+                                                                                                        if(p_rank == MASTER) printf("Marker Qbar scale\n");
 
             MPI_Reduce(Q_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
                 MPI_SUM, j + recon_inf.proc_rows - recon_inf.max_fails, col_comm);
+            
+                                                                                                        if(p_rank == MASTER) printf("Marker Reduce\n");
         }
-    }
-    else { //reduce checksums to checksum nodes
-        for (j=0; j < recon_inf.max_fails; ++j) {
+        else { //reduce checksums to checksum nodes
             MPI_Reduce(Q_bar, Q, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
                 MPI_SUM, j + recon_inf.proc_rows - recon_inf.max_fails, col_comm);
         }
@@ -221,6 +228,7 @@ void checksumV(double *Q, int p_rank) {
 }
 
 void checksumH(double *Q, int p_rank) {
+    if(recon_inf.max_fails == 0) return;
     int i, j;
 
     int p_col = p_rank % recon_inf.proc_cols;
@@ -231,12 +239,11 @@ void checksumH(double *Q, int p_rank) {
 
     if (cs_col < 0) { //if non-checksum node
         for (j=0; j < recon_inf.max_fails; ++j) {
-            /* Copy Q to Qbar*/
-            LAPACKE_dlacpy(CblasRowMajor, 'A', recon_inf.loc_rows, recon_inf.loc_cols, Q, 
-                recon_inf.loc_cols, Q_bar, recon_inf.loc_cols);
 
-            /* Mult Qbar by corrosponding Gh_tilde term*/
-            cblas_dscal(recon_inf.loc_cols * recon_inf.loc_rows, recon_inf.Gh_tilde[p_col * recon_inf.max_fails + j], Q_bar, 1);
+            /* Copy corrosponding Gh_tilde term * Q -> Qbar*/
+            cblas_daxpby(recon_inf.loc_cols * recon_inf.loc_rows, 
+                recon_inf.Gh_tilde[p_col * recon_inf.max_fails + j], 
+                Q, 1, 0, Q_bar, 1);
 
             MPI_Reduce(Q_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
                 MPI_SUM, j + recon_inf.proc_cols - recon_inf.max_fails, row_comm);
@@ -326,12 +333,10 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
             if(!node_status[i]) { 
                 /* if chosen node */
                 if(first_m_nodes_i[p_row] > -1) {
-                    /* Copy Q to Qbar*/
-                    LAPACKE_dlacpy(CblasRowMajor, 'A', recon_inf.loc_rows, recon_inf.loc_cols, Q, 
-                        recon_inf.loc_cols, Q_bar, recon_inf.loc_cols);
 
-                    /* Mult Qbar by corrosponding Gv_succ term*/
-                    cblas_dscal(recon_inf.loc_rows * recon_inf.loc_cols, Gv_succ[i * n + first_m_nodes_i[p_row]], Q_bar, 1);
+                    /* Copy Gv_succ * Q to Qbar*/
+                    cblas_daxpby(recon_inf.loc_rows * recon_inf.loc_cols, Gv_succ[i * n + first_m_nodes_i[p_row]], 
+                        Q, 1, 0, Q_bar, 1);
  
                 }
                 MPI_Reduce(Q_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, MPI_SUM, i, col_comm);
@@ -430,12 +435,10 @@ void reconstructR(double* R, int* node_status, int p_rank) {
             if(!node_status[i]) { 
                 /* if chosen node */
                 if(first_n_nodes_i[p_col] > -1) {
-                    /* Copy R to Rbar*/
-                    LAPACKE_dlacpy(CblasRowMajor, 'A', recon_inf.loc_rows, recon_inf.loc_cols, R, 
-                        recon_inf.loc_cols, R_bar, recon_inf.loc_cols);
 
-                    /* Mult Qbar by corrosponding Gv_succ term*/
-                    cblas_dscal(recon_inf.loc_rows * recon_inf.loc_cols, Gh_succ[n * first_n_nodes_i[p_col] + i], R_bar, 1);
+                    /* Copy Gh_succ * R to Rbar*/
+                    cblas_daxpby(recon_inf.loc_rows * recon_inf.loc_cols, Gh_succ[n * first_n_nodes_i[p_col] + i], 
+                        R, 1, 0, R_bar, 1);
                 } 
                 MPI_Reduce(R_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, MPI_SUM, i, row_comm); 
                 for (j=recon_inf.loc_cols * recon_inf.loc_rows-1; j >=0; --j) { R_bar[j] = 0; }
@@ -609,6 +612,10 @@ void pbmgs(double* Q, double* R, int p_rank,
     outputs Q^T into Q */
 void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank, 
     int proc_cols, int proc_rows, int loc_cols, int loc_rows, int max_fails) {
+
+    if (max_fails == 0) {
+        return;
+    }
     
     int i, j, k;
     int p_col = p_rank % proc_cols;
@@ -651,10 +658,7 @@ void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank,
         
         /* Perform Q_res = G0 * Q1 */
         for (i=0; i < m; ++i) {
-            LAPACKE_dlacpy(CblasRowMajor, 'A', loc_rows, loc_cols, 
-                Q, loc_cols, Q_bar, loc_cols);
-
-            cblas_dscal(loc_cols * loc_rows, G0[i * n + p_row], Q_bar, 1);
+            cblas_daxpby(loc_cols * loc_rows, G0[i * n + p_row], Q, 1, 0, Q_bar, 1);
 
             MPI_Reduce(Q_bar, Q_res, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, reg_col);
         }
@@ -672,10 +676,7 @@ void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank,
 
         /* Q_res * G0 */
         for (i=0; i < n; ++i) {
-            LAPACKE_dlacpy(CblasRowMajor, 'A', loc_rows, loc_cols, 
-                Q_res, loc_cols, Q_bar, loc_cols);
-
-            cblas_dscal(loc_cols * loc_rows, G0[p_col * n + i], Q_bar, 1);
+            cblas_daxpby(loc_cols * loc_rows, G0[p_col * n + i], Q_res, 1, 0, Q_bar, 1);
 
             MPI_Reduce(Q_bar, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, reg_row);
         }

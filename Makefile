@@ -3,8 +3,8 @@ MPICC?=mpiicc
 CC = icc
 IDIR = ${MKLROOT}/include
 LDIR = ${MKLROOT}/lib/intel64
-CFLAGS= -m64 -I$(IDIR) -L$(LDIR)
-LIBS = -lmkl_scalapack_lp64 -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lmkl_blacs_intelmpi_lp64 -lpthread -lm -ldl
+CFLAGS= -m64 -O0 -ipo -fp-model precise -I$(IDIR) -L$(LDIR)
+LIBS = -lmkl_intel_lp64 -lmkl_sequential -lmkl_core -lm
 
 MAKEDIR = 
 
