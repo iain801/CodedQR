@@ -47,7 +47,7 @@ double checkError(double* A, double* Q, double* R, double* E,
     double out_norm = 0;    
 
     double  *Q_bar = mkl_calloc(loc_rows * glob_cols, sizeof(double), 16), 
-            *R_bar = mkl_calloc(loc_cols * glob_rows, sizeof(double), 16);
+            *R_bar = mkl_calloc(loc_cols * glob_rows, sizeof(double), 64);
 
     MPI_Allgather(Q, loc_rows * loc_cols, MPI_DOUBLE, Q_bar, 
         loc_rows * loc_cols, MPI_DOUBLE, row_comm);
@@ -129,7 +129,7 @@ void gatherA(double** A,  int p_rank, int proc_cols,
 
     /* Master compiles matrix A from across processes */
     if (p_rank == MASTER) {
-        double *A_glob = mkl_malloc(glob_cols * glob_rows * sizeof(double), 16);
+        double *A_glob = mkl_malloc(glob_cols * glob_rows * sizeof(double), 64);
         for (i = 0; i < proc_cols; ++i) {
             for (j = 0; j < proc_rows; ++j) {
 
@@ -170,7 +170,7 @@ void constructGv(double* Gv, int proc_rows, int f) {
     int p_rank;
     MPI_Comm_rank(glob_comm, &p_rank);  
 
-    double* V = mkl_calloc(((proc_rows - f) - f) * f, sizeof(double), 16);
+    double* V = mkl_calloc(((proc_rows - f) - f) * f, sizeof(double), 64);
     randMatrix(V, (proc_rows - f) - f, f);
 
     cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans, f, f, proc_rows - 2*f, 
@@ -202,7 +202,7 @@ void checksumV(double *Q, int p_rank) {
     int p_row = p_rank / recon_inf.proc_cols;
     int cs_row = p_row - recon_inf.proc_rows + recon_inf.max_fails;
     
-    double* Q_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 16);
+    double* Q_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 64);
 
     for (j=0; j < recon_inf.max_fails; ++j) {
         if (cs_row < 0) { //if non-checksum node
@@ -212,17 +212,14 @@ void checksumV(double *Q, int p_rank) {
                 recon_inf.Gv_tilde[j * (recon_inf.proc_rows - recon_inf.max_fails) + p_row], 
                 Q, 1, 0, Q_bar, 1);
 
-                                                                                                        if(p_rank == MASTER) printf("Marker Qbar scale\n");
+            // if(p_rank == MASTER) printf("Marker Qbar scale\n");
+        }
 
-            MPI_Reduce(Q_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
-                MPI_SUM, j + recon_inf.proc_rows - recon_inf.max_fails, col_comm);
-            
-                                                                                                        if(p_rank == MASTER) printf("Marker Reduce\n");
-        }
-        else { //reduce checksums to checksum nodes
-            MPI_Reduce(Q_bar, Q, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
-                MPI_SUM, j + recon_inf.proc_rows - recon_inf.max_fails, col_comm);
-        }
+        //reduce checksums to checksum nodes
+        MPI_Reduce(Q_bar, Q, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
+            MPI_SUM, j + recon_inf.proc_rows - recon_inf.max_fails, col_comm);
+
+        // if(p_rank == MASTER) printf("Marker Reduce\n");
     }
     mkl_free(Q_bar);
 }
@@ -235,25 +232,21 @@ void checksumH(double *Q, int p_rank) {
     int p_row = p_rank / recon_inf.proc_cols;
     int cs_col = p_col - recon_inf.proc_cols + recon_inf.max_fails;
     
-    double* Q_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 16);
+    double* Q_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 64);
 
-    if (cs_col < 0) { //if non-checksum node
-        for (j=0; j < recon_inf.max_fails; ++j) {
+    for (j=0; j < recon_inf.max_fails; ++j) {
+        if (cs_col < 0) { //if non-checksum node
 
             /* Copy corrosponding Gh_tilde term * Q -> Qbar*/
             cblas_daxpby(recon_inf.loc_cols * recon_inf.loc_rows, 
                 recon_inf.Gh_tilde[p_col * recon_inf.max_fails + j], 
                 Q, 1, 0, Q_bar, 1);
+        }
 
-            MPI_Reduce(Q_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
-                MPI_SUM, j + recon_inf.proc_cols - recon_inf.max_fails, row_comm);
-        }
-    }
-    else { //reduce checksums to checksum nodes
-        for (j=0; j < recon_inf.max_fails; ++j) {
-            MPI_Reduce(Q_bar, Q, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
-                MPI_SUM, j + recon_inf.proc_cols - recon_inf.max_fails, row_comm);
-        }
+        //reduce checksums to checksum nodes
+        MPI_Reduce(Q_bar, Q, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
+            MPI_SUM, j + recon_inf.proc_cols - recon_inf.max_fails, row_comm);
+
     }
     mkl_free(Q_bar);
 }
@@ -273,7 +266,7 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
     int p_row = p_rank / recon_inf.proc_cols;
     int m = recon_inf.proc_rows - recon_inf.max_fails;
     int n = recon_inf.proc_cols - recon_inf.max_fails;
-    double* Q_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 16);
+    double* Q_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 64);
         
     int reg_fails = 0;
     for (i=0; i < m; ++i) {
@@ -287,10 +280,10 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
         /*********** Compute Success Matrix ****************/
 
         /* first m active nodes map, first_m_nodes[index] = node */
-        int* first_m_nodes = mkl_malloc(m * sizeof(int), 16);
+        int* first_m_nodes = mkl_malloc(m * sizeof(int), 64);
 
         /* inverse active node map, first_m_nodes_i[node] = index */
-        int* first_m_nodes_i = mkl_malloc(recon_inf.proc_rows * sizeof(int), 16);
+        int* first_m_nodes_i = mkl_malloc(recon_inf.proc_rows * sizeof(int), 64);
 
         /* fill node maps with first m active nodes */
         for (i=0, j=0; j < m; ++i) {
@@ -309,7 +302,7 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
             first_m_nodes_i[i] = -1;
         }
 
-        double* Gv_succ = mkl_calloc(n * m, sizeof(double), 16);
+        double* Gv_succ = mkl_calloc(n * m, sizeof(double), 64);
         for (i=0; i < m; ++i) {
             /* if regular node, set Gv_succ to 1 */
             if (first_m_nodes[i] < m) { 
@@ -322,7 +315,7 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
         }
 
         /* Take inverse of success matrix */
-        int* ipiv = mkl_malloc(m * sizeof(int), 16);
+        int* ipiv = mkl_malloc(m * sizeof(int), 64);
         LAPACKE_dgetrf(LAPACK_ROW_MAJOR, m, n, Gv_succ, n, ipiv);
         LAPACKE_dgetri(LAPACK_ROW_MAJOR, m, Gv_succ, n, ipiv);
 
@@ -375,7 +368,7 @@ void reconstructR(double* R, int* node_status, int p_rank) {
     int p_row = p_rank / recon_inf.proc_cols;
     int m = recon_inf.proc_rows - recon_inf.max_fails;
     int n = recon_inf.proc_cols - recon_inf.max_fails;
-    double* R_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 16);
+    double* R_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 64);
 
     int reg_fails = 0;
     for (i=0; i < n; ++i) {
@@ -389,10 +382,10 @@ void reconstructR(double* R, int* node_status, int p_rank) {
         /*********** Compute Success Matrix ****************/
 
         /* first n active nodes map, first_n_nodes[index] = node */
-        int* first_n_nodes = mkl_malloc(n * sizeof(int), 16);
+        int* first_n_nodes = mkl_malloc(n * sizeof(int), 64);
 
         /* inverse active node map, first_n_nodes_i[node] = index */
-        int* first_n_nodes_i = mkl_malloc(recon_inf.proc_cols * sizeof(int), 16);
+        int* first_n_nodes_i = mkl_malloc(recon_inf.proc_cols * sizeof(int), 64);
 
         /* fill node maps with first n active nodes */
         for (i=0, j=0; j < n; ++i) {
@@ -411,7 +404,7 @@ void reconstructR(double* R, int* node_status, int p_rank) {
             first_n_nodes_i[i] = -1;
         }
 
-        double* Gh_succ = mkl_calloc(n * m, sizeof(double), 16);
+        double* Gh_succ = mkl_calloc(n * m, sizeof(double), 64);
         for (i=0; i < n; ++i) {
             /* if regular node, set Gh_succ to 1 */
             if (first_n_nodes[i] < n) { 
@@ -424,7 +417,7 @@ void reconstructR(double* R, int* node_status, int p_rank) {
         }
 
         /* Take inverse of success matrix */
-        int* ipiv = mkl_malloc(n * sizeof(int), 16);
+        int* ipiv = mkl_malloc(n * sizeof(int), 64);
         LAPACKE_dgetrf(LAPACK_ROW_MAJOR, n, m, Gh_succ, m, ipiv);
         LAPACKE_dgetri(LAPACK_ROW_MAJOR, n, Gh_succ, m, ipiv);
 
@@ -480,8 +473,8 @@ void pbmgs(double* Q, double* R, int p_rank,
     int p_col = p_rank % proc_cols;
     int p_row = p_rank / proc_cols;
 
-    double* Qbar = mkl_malloc(loc_cols * loc_rows * sizeof(double), 16);
-    double* Rbar = mkl_malloc(loc_cols * loc_rows * sizeof(double), 16);
+    double* Qbar = mkl_malloc(loc_cols * loc_rows * sizeof(double), 64);
+    double* Rbar = mkl_malloc(loc_cols * loc_rows * sizeof(double), 64);
 
     /* For each block */
     for (APC = 0; APC < proc_cols; ++APC) {
@@ -632,7 +625,7 @@ void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank,
     MPI_Comm_split(reg_comm, p_row, p_col, &reg_row);
     MPI_Comm_rank(reg_comm, &reg_rank);
     
-    double* G0 = mkl_calloc(n * m, sizeof(double), 16);
+    double* G0 = mkl_calloc(n * m, sizeof(double), 64);
     
     /* Copy Gv into G0 */
     cblas_dcopy(n * max_fails, Gv_tilde, 1, G0, 1);
@@ -653,8 +646,8 @@ void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank,
         operation (G0Q1)^T G0 */
     if (!is_check) {
 
-        double* Q_bar = mkl_calloc(loc_cols * loc_rows, sizeof(double), 16);
-        double* Q_res = mkl_calloc(loc_cols * loc_rows, sizeof(double), 16);
+        double* Q_bar = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
+        double* Q_res = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
         
         /* Perform Q_res = G0 * Q1 */
         for (i=0; i < m; ++i) {

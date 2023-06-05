@@ -1,12 +1,11 @@
 #!/bin/bash -l
-#SBATCH --nodes=2 --ntasks-per-node=25 --distribution=cyclic
-# SBATCH --ntasks=49
+# SBATCH --nodes=2 --ntasks-per-node=25 --distribution=cyclic
+#SBATCH --ntasks=50
 
 cd $SLURM_SUBMIT_DIR
 
 /bin/hostname
 mpirun --version
-
 
 make codedqr
 
@@ -25,8 +24,11 @@ do
         # mpirun -np 64 ./out/codedqr_main 840 140 2
         # mpirun -np 49 ./out/codedqr_main 840 140 1
         # mpirun -np 36 ./out/codedqr_main 840 140 0
-        mpirun -np 49 ./out/codedqr_main 840 168 2
-        mpirun -np 36 ./out/codedqr_main 840 168 1
-        mpirun -np 25 ./out/codedqr_main 840 168 0
+        # mpirun -np 49 ./out/codedqr_main 840 168 2
+        # mpirun -np 36 ./out/codedqr_main 840 168 1
+        # mpirun -np 25 ./out/codedqr_main 840 168 0
+        mpirun -np 49 ./out/codedqr_main 5 1 2
+        mpirun -np 36 ./out/codedqr_main 5 1 1
+        mpirun -np 25 ./out/codedqr_main 5 1 0
     done
 done

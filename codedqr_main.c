@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
 
     if (p_rank == MASTER)
     {
-        A = mkl_calloc((glob_cols + check_cols) * (glob_rows + check_rows), sizeof(double), 16);
+        A = mkl_calloc((glob_cols + check_cols) * (glob_rows + check_rows), sizeof(double), 64);
         printf("mpirun -np %d ./out/codedqr_main %d %d %d\n", proc_size, glob_cols, loc_cols, max_fails);
         printf("There are %d tasks in %d rows and %d columns\n\n", proc_size, proc_rows, proc_cols);
 
@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
         else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
         randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
 
-        B = mkl_malloc(glob_rows * nrhs * sizeof(double), 16);
+        B = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
         randMatrix(B, glob_rows, nrhs);
 
         if(DEBUG) {
@@ -87,13 +87,13 @@ int main(int argc, char** argv) {
 
     /************* Distribute A across process Q *********************/
 
-    Q = mkl_calloc(loc_cols * loc_rows, sizeof(double), 16);
-    R = mkl_calloc(loc_cols * loc_rows, sizeof(double), 16);
+    Q = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
+    R = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
     
     scatterA(A, Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);
 
     if (p_rank == MASTER) mkl_free(A);
-    A = mkl_calloc(loc_cols * loc_rows, sizeof(double), 16);
+    A = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
 
     /* Start timer*/
     t1 = MPI_Wtime();
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
 
     /******************* R-Factor Checksums **************************/
 
-    Gh_tilde = mkl_calloc(max_fails * (proc_cols - max_fails), sizeof(double), 16);
+    Gh_tilde = mkl_calloc(max_fails * (proc_cols - max_fails), sizeof(double), 64);
     recon_inf.Gh_tilde = Gh_tilde;
 
     /* Construct Gh in master node and broadcast */
@@ -118,15 +118,19 @@ int main(int argc, char** argv) {
 
     MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
 
+    MPI_Barrier(glob_comm);
+
     if(p_row < proc_rows - max_fails) {
         checksumH(Q, p_rank);  
     }  
 
     glob_cols += max_fails * loc_cols;
 
+    MPI_Barrier(glob_comm);
+
     /******************* Q-Factor Checksums **************************/
 
-    Gv_tilde = mkl_calloc((proc_rows - max_fails) * max_fails, sizeof(double), 16);
+    Gv_tilde = mkl_calloc((proc_rows - max_fails) * max_fails, sizeof(double), 64);
     recon_inf.Gv_tilde = Gv_tilde;
 
     /* Construct Gv in master node and broadcast */
@@ -134,6 +138,8 @@ int main(int argc, char** argv) {
         constructGv(Gv_tilde, proc_cols, max_fails);
 
     MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm); 
+
+    MPI_Barrier(glob_comm);
 
     checksumV(Q, p_rank);
 
@@ -146,6 +152,8 @@ int main(int argc, char** argv) {
     MPI_Reduce(&t6, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
     t6 = exec_time / proc_size;
     }
+
+    MPI_Barrier(glob_comm);
 
     /****************** Copy A to Local Parts ************************/
     
@@ -170,15 +178,15 @@ int main(int argc, char** argv) {
     /******************** Test Reconstruction ************************/
     t3 = MPI_Wtime();
     
-    if(max_fails > 0) 
-        genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
-    if(max_fails > 1) {
-        genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
-        genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
-    }
+    // if(max_fails > 0) 
+    //     genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
+    // if(max_fails > 1) {
+    //     genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
+    //     genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
+    // }
 
-    int *row_status = mkl_malloc(proc_rows * sizeof(int), 16);
-    int *col_status = mkl_malloc(proc_rows * sizeof(int), 16);
+    int *row_status = mkl_malloc(proc_rows * sizeof(int), 64);
+    int *col_status = mkl_malloc(proc_rows * sizeof(int), 64);
 
     /* NOTE: Assuming proc_rows = proc_cols */
     for (int i=0;i<proc_rows;++i) {
@@ -200,9 +208,10 @@ int main(int argc, char** argv) {
     if (max_fails > 1 && p_row == 2) {
         row_status[0] = 0;
     }
-
-    reconstructR(R, row_status, p_rank);
-    reconstructQ(Q, col_status, p_rank);
+    MPI_Barrier(glob_comm);
+    // reconstructR(R, row_status, p_rank);
+    MPI_Barrier(glob_comm);
+    // reconstructQ(Q, col_status, p_rank);
 
     mkl_free(row_status);
     mkl_free(col_status);
@@ -218,7 +227,7 @@ int main(int argc, char** argv) {
 
     /****************** Check Results of QR **************************/
 
-    E = mkl_calloc(loc_cols * loc_rows, sizeof(double), 16);
+    E = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
 
     t1 = MPI_Wtime();
     
@@ -233,6 +242,7 @@ int main(int argc, char** argv) {
     t4 = exec_time / proc_size;
     }
     
+    MPI_Barrier(glob_comm);
     t1 = MPI_Wtime();
     postOrthogonalize(Q, Gv_tilde, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);   
     t3 = MPI_Wtime() - t1;   
@@ -255,7 +265,7 @@ int main(int argc, char** argv) {
     /******************* Solve linear system *************************/
     if (p_rank == MASTER) {
         t1 = MPI_Wtime();
-        X = mkl_malloc(glob_rows * nrhs * sizeof(double), 16);
+        X = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
         LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
         t1 = MPI_Wtime() - t1;
