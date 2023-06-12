@@ -1,6 +1,6 @@
 #!/bin/bash -l
-# SBATCH --nodes=2 --ntasks-per-node=25 --distribution=cyclic
-#SBATCH --ntasks=50
+# SBATCH --nodes=4 --ntasks-per-node=25 --distribution=cyclic:fcyclic
+#SBATCH --ntasks=100
 
 cd $SLURM_SUBMIT_DIR
 
@@ -11,24 +11,29 @@ make codedqr
 
 # mpirun -np 64 ./out/codedqr_main 2520 360 1 msc.csv
 
+OUTPATH='codedqr-test.csv'
+
 for I in {1..10}
 do
-    for X in {1..4}
+    for X in {2..5}
     do        
-        # mpirun -np 100 ./out/codedqr_main 840 105 2
-        # mpirun -np 81 ./out/codedqr_main 840 105 1
-        # mpirun -np 64 ./out/codedqr_main 840 105 0
-        # mpirun -np 81 ./out/codedqr_main 840 120 2
-        # mpirun -np 64 ./out/codedqr_main 840 120 1
-        # mpirun -np 49 ./out/codedqr_main 840 120 0
-        # mpirun -np 64 ./out/codedqr_main 840 140 2
-        # mpirun -np 49 ./out/codedqr_main 840 140 1
-        # mpirun -np 36 ./out/codedqr_main 840 140 0
-        # mpirun -np 49 ./out/codedqr_main 840 168 2
-        # mpirun -np 36 ./out/codedqr_main 840 168 1
-        # mpirun -np 25 ./out/codedqr_main 840 168 0
-        mpirun -np 49 ./out/codedqr_main 5 1 2
-        mpirun -np 36 ./out/codedqr_main 5 1 1
-        mpirun -np 25 ./out/codedqr_main 5 1 0
+        mpirun -np 100 ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 2 $OUTPATH
+        mpirun -np 81  ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 1 $OUTPATH
+        mpirun -np 64  ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 0 $OUTPATH
+        mpirun -np 81  ./out/codedqr_main $(( 840 * $X )) $(( 120 * $X )) 2 $OUTPATH
+        mpirun -np 64  ./out/codedqr_main $(( 840 * $X )) $(( 120 * $X )) 1 $OUTPATH
+        mpirun -np 49  ./out/codedqr_main $(( 840 * $X )) $(( 120 * $X )) 0 $OUTPATH
+        mpirun -np 64  ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 2 $OUTPATH
+        mpirun -np 49  ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 1 $OUTPATH
+        mpirun -np 36  ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 0 $OUTPATH
+        mpirun -np 49  ./out/codedqr_main $(( 840 * $X )) $(( 168 * $X )) 2 $OUTPATH
+        mpirun -np 36  ./out/codedqr_main $(( 840 * $X )) $(( 168 * $X )) 1 $OUTPATH
+        mpirun -np 25  ./out/codedqr_main $(( 840 * $X )) $(( 168 * $X )) 0 $OUTPATH
+#         # mpirun -np 49 ./out/codedqr_main 5 1 2 msc.csv
+#         # mpirun -np 36 ./out/codedqr_main 5 1 1 msc.csv
+#         # mpirun -np 25 ./out/codedqr_main 5 1 0 msc.csv
     done
 done
+
+
+# mpirun -np 100 valgrind --leak-check=full --show-reachable=yes --track-origins=yes --log-file=val/nc.vg.%p ./out/codedqr_main 840 105 2 msc.csv

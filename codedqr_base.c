@@ -267,57 +267,61 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
     int m = recon_inf.proc_rows - recon_inf.max_fails;
     int n = recon_inf.proc_cols - recon_inf.max_fails;
     double* Q_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 64);
-        
+    double* Gv_succ = mkl_calloc(n * m, sizeof(double), 64);
+
+    
+    /* first m active nodes map, first_m_nodes[index] = node */
+    int* first_m_nodes = mkl_malloc(m * sizeof(int), 64);
+
+    /* inverse active node map, first_m_nodes_i[node] = index */
+    int* first_m_nodes_i = mkl_malloc(recon_inf.proc_rows * sizeof(int), 64);
+    
     int reg_fails = 0;
     for (i=0; i < m; ++i) {
         if (!node_status[i])
             reg_fails = 1;
     }  
+    
+    if (reg_fails) {
+        /* if node is active */
+        if (node_status[p_row]) {
 
-    /* if node is active */
-    if (reg_fails && node_status[p_row]) {
+            /*********** Compute Success Matrix ****************/
 
-        /*********** Compute Success Matrix ****************/
-
-        /* first m active nodes map, first_m_nodes[index] = node */
-        int* first_m_nodes = mkl_malloc(m * sizeof(int), 64);
-
-        /* inverse active node map, first_m_nodes_i[node] = index */
-        int* first_m_nodes_i = mkl_malloc(recon_inf.proc_rows * sizeof(int), 64);
-
-        /* fill node maps with first m active nodes */
-        for (i=0, j=0; j < m; ++i) {
-            if (node_status[i]) {
-                first_m_nodes_i[i] = j;
-                first_m_nodes[j++] = i;
+            /* fill node maps with first m active nodes */
+            for (i=0, j=0; j < m; ++i) {
+                if (node_status[i]) {
+                    first_m_nodes_i[i] = j;
+                    first_m_nodes[j++] = i;
+                }
+                /* if node is failed, set inverse map to -1 */
+                else {
+                    first_m_nodes_i[i] = -1;
+                }
             }
-            /* if node is failed, set inverse map to -1 */
-            else {
+
+            /* finish filling inverse map with -1 */
+            for (;i<recon_inf.proc_rows;++i) {
                 first_m_nodes_i[i] = -1;
             }
-        }
 
-        /* finish filling inverse map with -1 */
-        for (;i<recon_inf.proc_rows;++i) {
-            first_m_nodes_i[i] = -1;
-        }
-
-        double* Gv_succ = mkl_calloc(n * m, sizeof(double), 64);
-        for (i=0; i < m; ++i) {
-            /* if regular node, set Gv_succ to 1 */
-            if (first_m_nodes[i] < m) { 
-                Gv_succ[i * n + first_m_nodes[i]] = 1;
+            for (i=0; i < m; ++i) {
+                /* if regular node, set Gv_succ to 1 */
+                if (first_m_nodes[i] < m) { 
+                    Gv_succ[i * n + first_m_nodes[i]] = 1;
+                }
+                /* if checksum node, set Gv_succ to Gv_tidle */
+                else {
+                    cblas_dcopy(n, recon_inf.Gv_tilde + (first_m_nodes[i] - m) * n, 1, Gv_succ + i * n, 1);
+                }
             }
-            /* if checksum node, set Gv_succ to Gv_tidle */
-            else {
-                cblas_dcopy(n, recon_inf.Gv_tilde + (first_m_nodes[i] - m) * n, 1, Gv_succ + i * n, 1);
-            }
-        }
 
-        /* Take inverse of success matrix */
-        int* ipiv = mkl_malloc(m * sizeof(int), 64);
-        LAPACKE_dgetrf(LAPACK_ROW_MAJOR, m, n, Gv_succ, n, ipiv);
-        LAPACKE_dgetri(LAPACK_ROW_MAJOR, m, Gv_succ, n, ipiv);
+            /* Take inverse of success matrix */
+            int* ipiv = mkl_malloc(m * sizeof(int), 64);
+            LAPACKE_dgetrf(LAPACK_ROW_MAJOR, m, n, Gv_succ, n, ipiv);
+            LAPACKE_dgetri(LAPACK_ROW_MAJOR, m, Gv_succ, n, ipiv);
+            mkl_free(ipiv);
+        }
 
         /************ Perform Matrix Reductions ***********/
         
@@ -332,21 +336,8 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
                         Q, 1, 0, Q_bar, 1);
  
                 }
-                MPI_Reduce(Q_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, MPI_SUM, i, col_comm);
-                for (j=recon_inf.loc_cols * recon_inf.loc_rows-1; j >=0; --j) { Q_bar[j] = 0; }
-            }
-        }
-        mkl_free(ipiv);
-        mkl_free(Gv_succ);
-        mkl_free(first_m_nodes);
-        mkl_free(first_m_nodes_i);
-    }
-
-    /* If node is failed */
-    else if (reg_fails && p_row < m){
-        for(i=0; i<recon_inf.proc_rows; ++i) {
-            if(!node_status[i]) {
                 MPI_Reduce(Q_bar, Q, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, MPI_SUM, i, col_comm);
+                for (j=recon_inf.loc_cols * recon_inf.loc_rows-1; j >=0; --j) { Q_bar[j] = 0; }
             }
         }
     }
@@ -358,6 +349,10 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
             break;
         }   
     }
+
+    mkl_free(Gv_succ);
+    mkl_free(first_m_nodes);
+    mkl_free(first_m_nodes_i);
     mkl_free(Q_bar);
 }
 
@@ -369,57 +364,59 @@ void reconstructR(double* R, int* node_status, int p_rank) {
     int m = recon_inf.proc_rows - recon_inf.max_fails;
     int n = recon_inf.proc_cols - recon_inf.max_fails;
     double* R_bar = mkl_calloc(recon_inf.loc_cols * recon_inf.loc_rows, sizeof(double), 64);
+    double* Gh_succ = mkl_calloc(n * m, sizeof(double), 64);
 
     int reg_fails = 0;
     for (i=0; i < n; ++i) {
         if (!node_status[i])
             reg_fails = 1;
     }  
+    /* first n active nodes map, first_n_nodes[index] = node */
+    int* first_n_nodes = mkl_malloc(n * sizeof(int), 64);
+
+    /* inverse active node map, first_n_nodes_i[node] = index */
+    int* first_n_nodes_i = mkl_malloc(recon_inf.proc_cols * sizeof(int), 64);
 
     /* if node is active */
-    if (reg_fails && node_status[p_col]) {
+    if (reg_fails) {
+        if (node_status[p_col]) {
 
-        /*********** Compute Success Matrix ****************/
+            /*********** Compute Success Matrix ****************/
 
-        /* first n active nodes map, first_n_nodes[index] = node */
-        int* first_n_nodes = mkl_malloc(n * sizeof(int), 64);
-
-        /* inverse active node map, first_n_nodes_i[node] = index */
-        int* first_n_nodes_i = mkl_malloc(recon_inf.proc_cols * sizeof(int), 64);
-
-        /* fill node maps with first n active nodes */
-        for (i=0, j=0; j < n; ++i) {
-            if (node_status[i]) {
-                first_n_nodes_i[i] = j;
-                first_n_nodes[j++] = i;
+            /* fill node maps with first n active nodes */
+            for (i=0, j=0; j < n; ++i) {
+                if (node_status[i]) {
+                    first_n_nodes_i[i] = j;
+                    first_n_nodes[j++] = i;
+                }
+                /* if node is failed, set inverse map to -1 */
+                else {
+                    first_n_nodes_i[i] = -1;
+                }
             }
-            /* if node is failed, set inverse map to -1 */
-            else {
+
+            /* finish filling inverse map with -1 */
+            for (;i<recon_inf.proc_cols;++i) {
                 first_n_nodes_i[i] = -1;
             }
-        }
 
-        /* finish filling inverse map with -1 */
-        for (;i<recon_inf.proc_cols;++i) {
-            first_n_nodes_i[i] = -1;
-        }
-
-        double* Gh_succ = mkl_calloc(n * m, sizeof(double), 64);
-        for (i=0; i < n; ++i) {
-            /* if regular node, set Gh_succ to 1 */
-            if (first_n_nodes[i] < n) { 
-                Gh_succ[n * first_n_nodes[i] + i] = 1;
+            for (i=0; i < n; ++i) {
+                /* if regular node, set Gh_succ to 1 */
+                if (first_n_nodes[i] < n) { 
+                    Gh_succ[n * first_n_nodes[i] + i] = 1;
+                }
+                /* if checksum node, set Gh_succ to Gh_tidle */
+                else {
+                    cblas_dcopy(m, recon_inf.Gh_tilde + (first_n_nodes[i] - n), recon_inf.max_fails, Gh_succ + i, n);
+                }
             }
-            /* if checksum node, set Gh_succ to Gh_tidle */
-            else {
-                cblas_dcopy(m, recon_inf.Gh_tilde + (first_n_nodes[i] - n), recon_inf.max_fails, Gh_succ + i, n);
-            }
-        }
 
-        /* Take inverse of success matrix */
-        int* ipiv = mkl_malloc(n * sizeof(int), 64);
-        LAPACKE_dgetrf(LAPACK_ROW_MAJOR, n, m, Gh_succ, m, ipiv);
-        LAPACKE_dgetri(LAPACK_ROW_MAJOR, n, Gh_succ, m, ipiv);
+            /* Take inverse of success matrix */
+            int* ipiv = mkl_malloc(n * sizeof(int), 64);
+            LAPACKE_dgetrf(LAPACK_ROW_MAJOR, n, m, Gh_succ, m, ipiv);
+            LAPACKE_dgetri(LAPACK_ROW_MAJOR, n, Gh_succ, m, ipiv);
+            mkl_free(ipiv);
+        }
 
         /************ Perform Matrix Reductions ***********/
 
@@ -433,21 +430,8 @@ void reconstructR(double* R, int* node_status, int p_rank) {
                     cblas_daxpby(recon_inf.loc_rows * recon_inf.loc_cols, Gh_succ[n * first_n_nodes_i[p_col] + i], 
                         R, 1, 0, R_bar, 1);
                 } 
-                MPI_Reduce(R_bar, NULL, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, MPI_SUM, i, row_comm); 
+                MPI_Reduce(R_bar, R, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, MPI_SUM, i, row_comm); 
                 for (j=recon_inf.loc_cols * recon_inf.loc_rows-1; j >=0; --j) { R_bar[j] = 0; }
-            }            
-        }
-        mkl_free(ipiv);
-        mkl_free(Gh_succ);
-        mkl_free(first_n_nodes);
-        mkl_free(first_n_nodes_i);
-    }
-
-    /* If node is failed */
-    else if (reg_fails && p_row < m){
-        for(i=0; i<n; ++i) {
-            if(!node_status[i]) {
-                MPI_Reduce(R_bar, R, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, MPI_SUM, i, row_comm);
             }
         }
     }
@@ -459,6 +443,10 @@ void reconstructR(double* R, int* node_status, int p_rank) {
             break;
         }        
     }
+
+    mkl_free(Gh_succ);
+    mkl_free(first_n_nodes);
+    mkl_free(first_n_nodes_i);
     mkl_free(R_bar);
 }
 

@@ -178,12 +178,12 @@ int main(int argc, char** argv) {
     /******************** Test Reconstruction ************************/
     t3 = MPI_Wtime();
     
-    // if(max_fails > 0) 
-    //     genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
-    // if(max_fails > 1) {
-    //     genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
-    //     genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
-    // }
+    if(max_fails > 0) 
+        genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
+    if(max_fails > 1) {
+        genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
+        genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
+    }
 
     int *row_status = mkl_malloc(proc_rows * sizeof(int), 64);
     int *col_status = mkl_malloc(proc_rows * sizeof(int), 64);
@@ -209,9 +209,9 @@ int main(int argc, char** argv) {
         row_status[0] = 0;
     }
     MPI_Barrier(glob_comm);
-    // reconstructR(R, row_status, p_rank);
+    reconstructR(R, row_status, p_rank);
     MPI_Barrier(glob_comm);
-    // reconstructQ(Q, col_status, p_rank);
+    reconstructQ(Q, col_status, p_rank);
 
     mkl_free(row_status);
     mkl_free(col_status);
@@ -337,4 +337,5 @@ int main(int argc, char** argv) {
 
     mkl_free_buffers();
     MPI_Finalize();
+    return 0;
 }
