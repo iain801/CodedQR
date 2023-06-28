@@ -9,7 +9,7 @@ df['total'] = df.iloc[:, 3:].sum(axis=1)
 
 df = df[['n', 'p', 'f', 'recovery','final solve','post-ortho','cs construct','pbmgs','total']]
 
-df['p'] = df['p'] - df['f']
+# df['p'] = df['p'] - df['f']
 
 seconds = int(df['total'].sum())
 mins = seconds // 60
@@ -24,9 +24,21 @@ print(f'total time: {days}-{hours}:{mins}:{seconds}')
 alpha = 5e1
 gamma = 2e-2
 
-df['encode'] = df['cs construct'] / df['pbmgs']
-df['post'] = df['post-ortho'] / df['pbmgs']
-df['decode'] = df['recovery'] / df['pbmgs']
+# Add a new 'tqr' column initialized with the existing 'pbmgs' values
+df['tqr'] = df['pbmgs']
+
+# Create a dictionary mapping (n, p) tuples to corresponding pbmgs values where f is 0
+f_zero_dict = df.loc[df['f'] == 0].set_index(['n', 'p'])['pbmgs'].to_dict()
+
+# Update 'tqr' for all rows except where f is 0 using the values from the f_zero_dict
+df.loc[df['f'] != 0, 'tqr'] = df.loc[df['f'] != 0].apply(
+    lambda row: f_zero_dict.get((row['n'], row['p']), row['tqr']),
+    axis=1
+)
+
+df['encode'] = df['cs construct'] / df['tqr']
+df['post'] = df['post-ortho'] / df['tqr']
+df['decode'] = df['recovery'] / df['tqr']
 df['f/p'] = gamma * df['f'] / df['p']
 df['f/n'] = alpha * df['f'] / df['n']
 
