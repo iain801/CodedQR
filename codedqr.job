@@ -1,6 +1,6 @@
 #!/bin/bash -l
-# SBATCH --nodes=4 --ntasks-per-node=25 --distribution=cyclic:fcyclic
-#SBATCH --ntasks=100
+#SBATCH --nodes=4 --ntasks-per-node=25 --distribution=cyclic:fcyclic
+# SBATCH --ntasks=100
 
 cd $SLURM_SUBMIT_DIR
 

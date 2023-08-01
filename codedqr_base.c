@@ -216,6 +216,7 @@ void checksumV(double *Q, int p_rank) {
         }
 
         //reduce checksums to checksum nodes
+        //NOTE: THIS IS WHERE THE SEGFAULT OCCURS
         MPI_Reduce(Q_bar, Q, recon_inf.loc_cols * recon_inf.loc_rows, MPI_DOUBLE, 
             MPI_SUM, j + recon_inf.proc_rows - recon_inf.max_fails, col_comm);
 
@@ -260,6 +261,7 @@ void genFail(double* Q, double* R, int target_rank, int p_rank, int loc_cols, in
 }
 
 void reconstructQ(double* Q, int* node_status, int p_rank) {
+    if (recon_inf.max_fails == 0) return;
 
     int i, j, k;
     int p_col = p_rank % recon_inf.proc_cols;
@@ -357,6 +359,7 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
 }
 
 void reconstructR(double* R, int* node_status, int p_rank) {
+    if (recon_inf.max_fails == 0) return;
 
     int i, j, k;
     int p_col = p_rank % recon_inf.proc_cols;

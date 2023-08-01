@@ -95,9 +95,6 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER) mkl_free(A);
     A = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
 
-    /* Start timer*/
-    t1 = MPI_Wtime();
-
     /***************** Setup recon_inf Struct ************************/
 
     recon_inf.loc_cols = loc_cols;
@@ -106,45 +103,46 @@ int main(int argc, char** argv) {
     recon_inf.p_rank = p_rank;
     recon_inf.proc_cols = proc_cols;
     recon_inf.proc_rows = proc_rows;
-
-    /******************* R-Factor Checksums **************************/
-
     Gh_tilde = mkl_calloc(max_fails * (proc_cols - max_fails), sizeof(double), 64);
-    recon_inf.Gh_tilde = Gh_tilde;
-
-    /* Construct Gh in master node and broadcast */
-    if (p_rank == MASTER)
-        constructGh(Gh_tilde, proc_cols, max_fails);
-
-    MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
-
-    MPI_Barrier(glob_comm);
-
-    if(p_row < proc_rows - max_fails) {
-        checksumH(Q, p_rank);  
-    }  
-
-    glob_cols += max_fails * loc_cols;
-
-    MPI_Barrier(glob_comm);
-
-    /******************* Q-Factor Checksums **************************/
-
+    recon_inf.Gh_tilde = Gh_tilde; 
     Gv_tilde = mkl_calloc((proc_rows - max_fails) * max_fails, sizeof(double), 64);
     recon_inf.Gv_tilde = Gv_tilde;
 
-    /* Construct Gv in master node and broadcast */
-    if (p_rank == MASTER)
-        constructGv(Gv_tilde, proc_cols, max_fails);
+    /* Start timer*/
+    t1 = MPI_Wtime();
+    if (max_fails > 0) {
 
-    MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm); 
+    /******************* Generate Gv and Gh **************************/
+        
+        /* Construct Gh and Gv in master node and broadcast */
+        if (p_rank == MASTER) {
+            constructGh(Gh_tilde, proc_cols, max_fails);
+            constructGv(Gv_tilde, proc_cols, max_fails);
+        }
+        
+        MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
+        MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm); 
+        
+        // MPI_Barrier(glob_comm);
 
-    MPI_Barrier(glob_comm);
+    /******************* R-Factor Checksums **************************/
 
-    checksumV(Q, p_rank);
+        if(p_row < proc_rows - max_fails) {
+            checksumH(Q, p_rank);  
+        }  
+
+        glob_cols += max_fails * loc_cols;
+
+        // MPI_Barrier(glob_comm);
+
+    /******************* Q-Factor Checksums **************************/
+
+        //WHERE THE ERROR OCCURS
+        checksumV(Q, p_rank);
+    }
 
     /* End timer */
-    t6 = MPI_Wtime() - t1;    
+    t6 = MPI_Wtime() - t1;
 
     /* Take average execution time */
     {
@@ -153,7 +151,7 @@ int main(int argc, char** argv) {
     t6 = exec_time / proc_size;
     }
 
-    MPI_Barrier(glob_comm);
+    // MPI_Barrier(glob_comm);
 
     /****************** Copy A to Local Parts ************************/
     
@@ -176,7 +174,7 @@ int main(int argc, char** argv) {
     }
     
     /******************** Test Reconstruction ************************/
-    t3 = MPI_Wtime();
+    
     
     if(max_fails > 0) 
         genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
@@ -208,22 +206,23 @@ int main(int argc, char** argv) {
     if (max_fails > 1 && p_row == 2) {
         row_status[0] = 0;
     }
-    MPI_Barrier(glob_comm);
+
+    t3 = MPI_Wtime();
+
     reconstructR(R, row_status, p_rank);
-    MPI_Barrier(glob_comm);
     reconstructQ(Q, col_status, p_rank);
 
-    mkl_free(row_status);
-    mkl_free(col_status);
-
-    t5 = MPI_Wtime() - t3;   
+    t5 = MPI_Wtime() - t3;  
 
     /* Take average recovery time */
     {
     double exec_time;
     MPI_Reduce(&t5, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
     t5 = exec_time / proc_size;
-    }   
+    }  
+    
+    mkl_free(row_status);
+    mkl_free(col_status);
 
     /****************** Check Results of QR **************************/
 
