@@ -31,7 +31,10 @@ int main(int argc, char** argv) {
             *Gv_tilde,          /* Q Factor generator matrix */
             *Gh_tilde;          /* R Factor generator matrix */
 
-    double  t1, t2, t3, t4, t5, t6, /* timer */
+    double  t_solve, t_qr,      /* timer */
+            t_postortho,        /* timer */
+            t_valid,            /* timer */
+            t_decode, t_encode, /* timer */
             error_norm,         /* norm of error matrix */
             *X, *B,             /* linear system results */
             *E;                 /* error matrix */
@@ -76,8 +79,20 @@ int main(int argc, char** argv) {
         else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
         randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
 
+        /* Limit generated A precision to 5 decimal places */
+        for (int i=0; i < glob_rows * glob_cols; i++) {
+            A[i] = roundf(A[i] * 1e5);
+            A[i] = A[i] * 1e-5;
+        }
+
         B = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
         randMatrix(B, glob_rows, nrhs);
+
+        /* Limit generated B precision to 5 decimal places */
+        for (int i=0; i < glob_rows * nrhs; i++) {
+            B[i] = roundf(B[i] * 1e5);
+            B[i] = B[i] * 1e-5;
+        }
 
         if(DEBUG) {
             printf("Initializing array A: \n");
@@ -109,7 +124,7 @@ int main(int argc, char** argv) {
     recon_inf.Gv_tilde = Gv_tilde;
 
     /* Start timer*/
-    t1 = MPI_Wtime();
+    t_solve = MPI_Wtime();
     if (max_fails > 0) {
 
     /******************* Generate Gv and Gh **************************/
@@ -142,13 +157,13 @@ int main(int argc, char** argv) {
     }
 
     /* End timer */
-    t6 = MPI_Wtime() - t1;
+    t_encode = MPI_Wtime() - t_solve;
 
     /* Take average execution time */
     {
     double exec_time;
-    MPI_Reduce(&t6, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
-    t6 = exec_time / proc_size;
+    MPI_Reduce(&t_encode, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t_encode = exec_time / proc_size;
     }
 
     // MPI_Barrier(glob_comm);
@@ -159,18 +174,18 @@ int main(int argc, char** argv) {
     
     /************************ PBMGS **********************************/
     
-    t1 = MPI_Wtime();
+    t_solve = MPI_Wtime();
 
     pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
 
     /* End timer */
-    t2 = MPI_Wtime() - t1;    
+    t_qr = MPI_Wtime() - t_solve;    
 
     /* Take average execution time */
     {
     double exec_time;
-    MPI_Reduce(&t2, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
-    t2 = exec_time / proc_size;
+    MPI_Reduce(&t_qr, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t_qr = exec_time / proc_size;
     }
     
     /******************** Test Reconstruction ************************/
@@ -207,18 +222,18 @@ int main(int argc, char** argv) {
         row_status[0] = 0;
     }
 
-    t3 = MPI_Wtime();
+    t_postortho = MPI_Wtime();
 
     reconstructR(R, row_status, p_rank);
     reconstructQ(Q, col_status, p_rank);
 
-    t5 = MPI_Wtime() - t3;  
+    t_decode = MPI_Wtime() - t_postortho;  
 
     /* Take average recovery time */
     {
     double exec_time;
-    MPI_Reduce(&t5, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
-    t5 = exec_time / proc_size;
+    MPI_Reduce(&t_decode, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t_decode = exec_time / proc_size;
     }  
     
     mkl_free(row_status);
@@ -228,29 +243,29 @@ int main(int argc, char** argv) {
 
     E = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
 
-    t1 = MPI_Wtime();
+    t_solve = MPI_Wtime();
     
     error_norm = checkError(A, Q, R, E, loc_cols, loc_rows, glob_cols, glob_rows + check_rows);  
 
-    t4 = MPI_Wtime() - t1;   
+    t_valid = MPI_Wtime() - t_solve;   
 
     /* Take average checking time */
     {
     double exec_time;
-    MPI_Reduce(&t4, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
-    t4 = exec_time / proc_size;
+    MPI_Reduce(&t_valid, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t_valid = exec_time / proc_size;
     }
     
     MPI_Barrier(glob_comm);
-    t1 = MPI_Wtime();
+    t_solve = MPI_Wtime();
     postOrthogonalize(Q, Gv_tilde, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);   
-    t3 = MPI_Wtime() - t1;   
+    t_postortho = MPI_Wtime() - t_solve;   
 
     /* Take average checking time */
     {
     double exec_time;
-    MPI_Reduce(&t3, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
-    t3 = exec_time / proc_size;
+    MPI_Reduce(&t_postortho, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+    t_postortho = exec_time / proc_size;
     }  
 
         
@@ -263,11 +278,11 @@ int main(int argc, char** argv) {
 
     /******************* Solve linear system *************************/
     if (p_rank == MASTER) {
-        t1 = MPI_Wtime();
+        t_solve = MPI_Wtime();
         X = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
         LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
-        t1 = MPI_Wtime() - t1;
+        t_solve = MPI_Wtime() - t_solve;
 
         /* Print all matrices */
         if (glob_cols < 100 && glob_rows < 100) {
@@ -294,12 +309,12 @@ int main(int argc, char** argv) {
         }
     
         /* Print Stats */
-        printf("CS Construct Time: %.3g s\n", t6);
-        printf("PBMGS Time: %.3g s\n", t2);
-        printf("Node Recovery Time: %.3g s\n", t5);
-        printf("QR Checking Time: %.3g s\n", t4);
-        printf("Post-Ortho Time: %.3g s\n", t3);
-        printf("Serial Solve Time: %.3g s\n", t1);
+        printf("CS Construct Time: %.3g s\n", t_encode);
+        printf("PBMGS Time: %.3g s\n", t_qr);
+        printf("Node Recovery Time: %.3g s\n", t_decode);
+        printf("QR Checking Time: %.3g s\n", t_valid);
+        printf("Post-Ortho Time: %.3g s\n", t_postortho);
+        printf("Serial Solve Time: %.3g s\n", t_solve);
         printf("Roundoff Error: %.5g\n", error_norm); 
 
         if (error_norm > 1e-4) 
@@ -313,7 +328,7 @@ int main(int argc, char** argv) {
 
         FILE *log = fopen(fname,"a");
         fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
-            proc_rows-max_fails, glob_rows, max_fails, t5, t1, t3, t6, t2);
+            proc_rows-max_fails, glob_rows, max_fails, t_decode, t_solve, t_postortho, t_encode, t_qr);
         fclose(log);
 
         mkl_free(B);
