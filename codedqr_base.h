@@ -42,6 +42,8 @@ struct ReconInfo recon_inf;
 
 void printMatrix(double* matrix, int cols, int rows);
 
+void fprintMatrix(FILE* out, double* matrix, int cols, int rows);
+
 void iprintMatrix(int* matrix, int cols, int rows);
 
 void randMatrixR(double* A, int n, int m, int rowsize);

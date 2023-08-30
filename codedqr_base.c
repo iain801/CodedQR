@@ -19,6 +19,16 @@ void printMatrix(double* matrix, int cols, int rows) {
     printf("\n");
 }
 
+void fprintMatrix(FILE* out, double* matrix, int cols, int rows) {
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            fprintf(out, "%-+6.3f ", matrix[i*cols + j]);
+        }
+        fprintf(out, "\n");
+    }
+    fprintf(out, "\n");
+}
+
 void iprintMatrix(int* matrix, int cols, int rows) {
     for (int i = 0; i < rows; ++i) {
         for (int j = 0; j < cols; ++j) {
@@ -253,11 +263,12 @@ void checksumH(double *Q, int p_rank) {
 }
 
 void genFail(double* Q, double* R, int target_rank, int p_rank, int loc_cols, int loc_rows) {
-    int dim = loc_cols * loc_rows;
-    if (target_rank == p_rank)
-        for (int i=0; i < dim; ++i) {
-            Q[i] = R[i] = 0;
-        }
+    if (p_rank == target_rank) {
+        free(Q);
+        free(R);
+        Q = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
+        R = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
+    }
 }
 
 void reconstructQ(double* Q, int* node_status, int p_rank) {
