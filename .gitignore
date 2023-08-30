@@ -67,3 +67,4 @@ log_*.txt
 out/*
 *.pdf
 *.csv
+*_test.*
