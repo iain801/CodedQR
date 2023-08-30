@@ -124,37 +124,32 @@ int main(int argc, char** argv) {
     recon_inf.Gv_tilde = Gv_tilde;
 
     /* Start timer*/
+    MPI_Barrier(glob_comm);
     t_solve = MPI_Wtime();
-    if (max_fails > 0) {
 
     /******************* Generate Gv and Gh **************************/
         
-        /* Construct Gh and Gv in master node and broadcast */
-        if (p_rank == MASTER) {
-            constructGh(Gh_tilde, proc_cols, max_fails);
-            constructGv(Gv_tilde, proc_cols, max_fails);
-        }
+    /* Construct Gh and Gv in master node and broadcast */
+    if (p_rank == MASTER) {
+        constructGh(Gh_tilde, proc_cols, max_fails);
+        constructGv(Gv_tilde, proc_cols, max_fails);
+    }
+    
+    MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
+    MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm); 
         
-        MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
-        MPI_Bcast(Gv_tilde, (proc_rows - max_fails) * max_fails, MPI_DOUBLE, MASTER, glob_comm); 
-        
-        // MPI_Barrier(glob_comm);
-
     /******************* R-Factor Checksums **************************/
 
-        if(p_row < proc_rows - max_fails) {
-            checksumH(Q, p_rank);  
-        }  
+    if(p_row < proc_rows - max_fails) {
+        checksumH(Q, p_rank);  
+    }  
 
-        glob_cols += max_fails * loc_cols;
-
-        // MPI_Barrier(glob_comm);
+    glob_cols += max_fails * loc_cols;
 
     /******************* Q-Factor Checksums **************************/
 
-        //WHERE THE ERROR OCCURS
-        checksumV(Q, p_rank);
-    }
+    //WHERE THE ERROR OCCURS
+    checksumV(Q, p_rank);
 
     /* End timer */
     t_encode = MPI_Wtime() - t_solve;
@@ -166,14 +161,12 @@ int main(int argc, char** argv) {
     t_encode = exec_time / proc_size;
     }
 
-    // MPI_Barrier(glob_comm);
-
     /****************** Copy A to Local Parts ************************/
     
     LAPACKE_dlacpy(CblasRowMajor,'A', loc_rows, loc_cols, Q, loc_cols, A, loc_cols);
     
     /************************ PBMGS **********************************/
-    
+    /* Start timer*/
     t_solve = MPI_Wtime();
 
     pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
@@ -190,36 +183,35 @@ int main(int argc, char** argv) {
     
     /******************** Test Reconstruction ************************/
     
-    
-    if(max_fails > 0) 
-        genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
-    if(max_fails > 1) {
-        genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
-        genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
-    }
-
     int *row_status = mkl_malloc(proc_rows * sizeof(int), 64);
     int *col_status = mkl_malloc(proc_rows * sizeof(int), 64);
 
-    /* NOTE: Assuming proc_rows = proc_cols */
-    for (int i=0;i<proc_rows;++i) {
-        col_status[i] = 1;
-        row_status[i] = 1;
-    }
+    if(max_fails > 1) {
+        genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
+        genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
+        genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
 
-    if (max_fails > 0 && p_row == 1) {
-        row_status[0] = 0;
-        if(max_fails > 1) row_status[2] = 0;
-    }
-    if (max_fails > 0 && p_col == 0) {
-        col_status[1] = 0;
-        if(max_fails > 1) col_status[2] = 0;
-    }
-    if (max_fails > 1 && p_col == 2) {
-        col_status[1] = 0;
-    }
-    if (max_fails > 1 && p_row == 2) {
-        row_status[0] = 0;
+        /* NOTE: Assuming proc_rows = proc_cols */
+        for (int i=0;i<proc_rows;++i) {
+            col_status[i] = 1;
+            row_status[i] = 1;
+        }
+
+        if (p_row == 1) {
+            row_status[0] = 0;
+            if(max_fails > 1) row_status[2] = 0;
+        }
+        if (p_col == 0) {
+            col_status[1] = 0;
+            if(max_fails > 1) col_status[2] = 0;
+        }
+        if (p_col == 2) {
+            col_status[1] = 0;
+        }
+        if (p_row == 2) {
+            row_status[0] = 0;
+        }
+
     }
 
     t_postortho = MPI_Wtime();
@@ -324,7 +316,7 @@ int main(int argc, char** argv) {
         if (argc == 5)
             sprintf(fname, argv[4]);
         else
-            sprintf(fname, "codedqr-test.csv");
+            sprintf(fname, "msc.csv");
 
         FILE *log = fopen(fname,"a");
         fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 

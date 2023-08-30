@@ -1,39 +1,36 @@
 #!/bin/bash -l
-#SBATCH --nodes=4 --ntasks-per-node=25 --distribution=cyclic:fcyclic
+#SBATCH --nodes=29 --ntasks-per-node=7 --distribution=cyclic:fcyclic
 # SBATCH --ntasks=100
 
 cd $SLURM_SUBMIT_DIR
 
 /bin/hostname
-mpirun --version
 
 make codedqr
 
-# mpirun -np 64 ./out/codedqr_main 2520 360 1 msc.csv
-
 OUTPATH='codedqr-test.csv'
+
+# throwaway to set up mpi
+mpirun -np 196 ./out/codedqr_main 1680 168 4 msc.csv
 
 for I in {1..10}
 do
     for X in {2..5}
     do        
+        mpirun -np 196 ./out/codedqr_main $(( 840 * $X )) $(( 84 * $X )) 4 $OUTPATH
+        mpirun -np 144 ./out/codedqr_main $(( 840 * $X )) $(( 84 * $X )) 2 $OUTPATH
+        mpirun -np 100 ./out/codedqr_main $(( 840 * $X )) $(( 84 * $X )) 0 $OUTPATH
+
+        mpirun -np 144 ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 4 $OUTPATH
         mpirun -np 100 ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 2 $OUTPATH
-        mpirun -np 81  ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 1 $OUTPATH
         mpirun -np 64  ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 0 $OUTPATH
-        mpirun -np 81  ./out/codedqr_main $(( 840 * $X )) $(( 120 * $X )) 2 $OUTPATH
-        mpirun -np 64  ./out/codedqr_main $(( 840 * $X )) $(( 120 * $X )) 1 $OUTPATH
-        mpirun -np 49  ./out/codedqr_main $(( 840 * $X )) $(( 120 * $X )) 0 $OUTPATH
+
+        mpirun -np 100 ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 4 $OUTPATH
         mpirun -np 64  ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 2 $OUTPATH
-        mpirun -np 49  ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 1 $OUTPATH
         mpirun -np 36  ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 0 $OUTPATH
-        mpirun -np 49  ./out/codedqr_main $(( 840 * $X )) $(( 168 * $X )) 2 $OUTPATH
-        mpirun -np 36  ./out/codedqr_main $(( 840 * $X )) $(( 168 * $X )) 1 $OUTPATH
-        mpirun -np 25  ./out/codedqr_main $(( 840 * $X )) $(( 168 * $X )) 0 $OUTPATH
-#         # mpirun -np 49 ./out/codedqr_main 5 1 2 msc.csv
-#         # mpirun -np 36 ./out/codedqr_main 5 1 1 msc.csv
-#         # mpirun -np 25 ./out/codedqr_main 5 1 0 msc.csv
+
     done
 done
 
 
-# mpirun -np 100 valgrind --leak-check=full --show-reachable=yes --track-origins=yes --log-file=val/nc.vg.%p ./out/codedqr_main 840 105 2 msc.csv
+python test-stats.py
