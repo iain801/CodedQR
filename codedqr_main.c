@@ -120,9 +120,10 @@ int main(int argc, char** argv) {
     recon_info.p_rank = p_rank;
     recon_info.proc_cols = proc_cols;
     recon_info.proc_rows = proc_rows;
+    
     Gh_tilde = mkl_calloc(max_fails * (proc_cols - max_fails), sizeof(double), 64);
     recon_info.Gh_tilde = Gh_tilde; 
-    
+
     Gv_tilde = mkl_calloc((proc_rows - max_fails) * max_fails, sizeof(double), 64);
     recon_info.Gv_tilde = Gv_tilde;
 
@@ -275,7 +276,7 @@ int main(int argc, char** argv) {
             printf("WARNING: HIGH ERROR \n");
 
         char fname[30];
-        if (argc == 5)
+        if (argc == 4)
             sprintf(fname, argv[3]);
         else
             sprintf(fname, "msc.csv");

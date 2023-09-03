@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --nodes=29 --ntasks-per-node=7 --distribution=cyclic:fcyclic
+#SBATCH --nodes=6 --ntasks-per-node=40 --distribution=cyclic:fcyclic
 # SBATCH --ntasks=100
 
 cd $SLURM_SUBMIT_DIR
@@ -9,25 +9,34 @@ cd $SLURM_SUBMIT_DIR
 make codedqr
 
 OUTPATH='codedqr-test.csv'
+MULTIPLIER=3000
 
 # throwaway to set up mpi
-mpirun -np 196 ./out/codedqr_main 1680 168 4 msc.csv
+mpirun -np 196 ./out/codedqr_main 1680 4 msc.csv
 
 for I in {1..10}
 do
-    for X in {2..5}
+    for X in {1..4}
     do        
-        mpirun -np 196 ./out/codedqr_main $(( 840 * $X )) $(( 84 * $X )) 4 $OUTPATH
-        mpirun -np 144 ./out/codedqr_main $(( 840 * $X )) $(( 84 * $X )) 2 $OUTPATH
-        mpirun -np 100 ./out/codedqr_main $(( 840 * $X )) $(( 84 * $X )) 0 $OUTPATH
+        mpirun -np 225 ./out/codedqr_main $(( $MULTIPLIER * $X )) 3 $OUTPATH
+        mpirun -np 196 ./out/codedqr_main $(( $MULTIPLIER * $X )) 2 $OUTPATH
+        mpirun -np 169 ./out/codedqr_main $(( $MULTIPLIER * $X )) 1 $OUTPATH
+        mpirun -np 144 ./out/codedqr_main $(( $MULTIPLIER * $X )) 0 $OUTPATH
 
-        mpirun -np 144 ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 4 $OUTPATH
-        mpirun -np 100 ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 2 $OUTPATH
-        mpirun -np 64  ./out/codedqr_main $(( 840 * $X )) $(( 105 * $X )) 0 $OUTPATH
+        mpirun -np 169 ./out/codedqr_main $(( $MULTIPLIER * $X )) 3 $OUTPATH
+        mpirun -np 144 ./out/codedqr_main $(( $MULTIPLIER * $X )) 2 $OUTPATH
+        mpirun -np 121 ./out/codedqr_main $(( $MULTIPLIER * $X )) 1 $OUTPATH
+        mpirun -np 100 ./out/codedqr_main $(( $MULTIPLIER * $X )) 0 $OUTPATH
+        
+        mpirun -np 121 ./out/codedqr_main $(( $MULTIPLIER * $X )) 3 $OUTPATH
+        mpirun -np 100 ./out/codedqr_main $(( $MULTIPLIER * $X )) 2 $OUTPATH
+        mpirun -np 81  ./out/codedqr_main $(( $MULTIPLIER * $X )) 1 $OUTPATH
+        mpirun -np 64  ./out/codedqr_main $(( $MULTIPLIER * $X )) 0 $OUTPATH
 
-        mpirun -np 100 ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 4 $OUTPATH
-        mpirun -np 64  ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 2 $OUTPATH
-        mpirun -np 36  ./out/codedqr_main $(( 840 * $X )) $(( 140 * $X )) 0 $OUTPATH
+        mpirun -np 81  ./out/codedqr_main $(( $MULTIPLIER * $X )) 3 $OUTPATH
+        mpirun -np 64  ./out/codedqr_main $(( $MULTIPLIER * $X )) 2 $OUTPATH
+        mpirun -np 49  ./out/codedqr_main $(( $MULTIPLIER * $X )) 1 $OUTPATH
+        mpirun -np 36  ./out/codedqr_main $(( $MULTIPLIER * $X )) 0 $OUTPATH
 
     done
 done
