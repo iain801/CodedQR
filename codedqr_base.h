@@ -33,12 +33,12 @@ MPI_Comm glob_comm, row_comm, col_comm;
 MPI_Group row_group, col_group;
 
 struct ReconInfo {
-    double* Gv_tilde, *Gh_tilde;
+    double *Gv_tilde, *Gh_tilde, t_decode;
     int p_rank, proc_cols, proc_rows, 
         max_fails, loc_cols, loc_rows;
 };
 
-struct ReconInfo recon_inf;
+struct ReconInfo recon_info;
 
 void printMatrix(double* matrix, int cols, int rows);
 
@@ -67,7 +67,7 @@ void checksumV(double *Q, int p_rank);
 
 void checksumH(double *Q, int p_rank);
 
-void genFail(double* Q, double* R, int target_rank, int p_rank, int loc_cols, int loc_rows);
+void genFail(double* Q, double* R, int* col_status, int* row_status, int p_rank);
 
 void reconstructQ(double* Q, int* node_status, int p_rank);
 

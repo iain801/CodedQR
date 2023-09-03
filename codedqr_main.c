@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
 
     double  t_solve, t_qr,      /* timer */
             t_postortho,        /* timer */
-            t_valid,            /* timer */
+            t_valid, t_temp,    /* timer */
             t_decode, t_encode, /* timer */
             error_norm,         /* norm of error matrix */
             *X, *B,             /* linear system results */
@@ -49,11 +49,12 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(glob_comm, &p_rank);  
 
     glob_cols = glob_rows = atoi(argv[1]);
-    loc_cols = loc_rows = atoi(argv[2]);
-    max_fails = atoi(argv[3]);
+    max_fails = atoi(argv[2]);
     
-    proc_cols = glob_cols / loc_cols + max_fails;
-    proc_rows = proc_size / proc_cols;
+    proc_cols = proc_rows = (int) floor(sqrt(proc_size));
+    
+    loc_cols = glob_cols / (proc_cols - max_fails);
+    loc_rows = glob_rows / (proc_rows - max_fails);
 
     check_cols = loc_cols * max_fails;
     check_rows = loc_rows * max_fails;
@@ -71,8 +72,9 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER)
     {
         A = mkl_calloc((glob_cols + check_cols) * (glob_rows + check_rows), sizeof(double), 64);
-        printf("mpirun -np %d ./out/codedqr_main %d %d %d\n", proc_size, glob_cols, loc_cols, max_fails);
-        printf("There are %d tasks in %d rows and %d columns\n\n", proc_size, proc_rows, proc_cols);
+        printf("mpirun -np %d ./out/codedqr_main %d %d\n", proc_size, glob_cols, max_fails);
+        printf("There are %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
+        printf("Local matrix dimensions: %d x %d\n\n", loc_cols, loc_rows);
 
         /* Generate random matrix */
         if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, SET_SEED);
@@ -110,22 +112,25 @@ int main(int argc, char** argv) {
     if (p_rank == MASTER) mkl_free(A);
     A = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
 
-    /***************** Setup recon_inf Struct ************************/
+    /***************** Setup recon_info Struct ************************/
 
-    recon_inf.loc_cols = loc_cols;
-    recon_inf.loc_rows = loc_rows;
-    recon_inf.max_fails = max_fails;
-    recon_inf.p_rank = p_rank;
-    recon_inf.proc_cols = proc_cols;
-    recon_inf.proc_rows = proc_rows;
+    recon_info.loc_cols = loc_cols;
+    recon_info.loc_rows = loc_rows;
+    recon_info.max_fails = max_fails;
+    recon_info.p_rank = p_rank;
+    recon_info.proc_cols = proc_cols;
+    recon_info.proc_rows = proc_rows;
     Gh_tilde = mkl_calloc(max_fails * (proc_cols - max_fails), sizeof(double), 64);
-    recon_inf.Gh_tilde = Gh_tilde; 
+    recon_info.Gh_tilde = Gh_tilde; 
+    
     Gv_tilde = mkl_calloc((proc_rows - max_fails) * max_fails, sizeof(double), 64);
-    recon_inf.Gv_tilde = Gv_tilde;
+    recon_info.Gv_tilde = Gv_tilde;
+
+    recon_info.t_decode = 0.0;
 
     /* Start timer*/
     MPI_Barrier(glob_comm);
-    t_solve = MPI_Wtime();
+    t_temp = MPI_Wtime();
 
     /******************* Generate Gv and Gh **************************/
         
@@ -152,7 +157,7 @@ int main(int argc, char** argv) {
     checksumV(Q, p_rank);
 
     /* End timer */
-    t_encode = MPI_Wtime() - t_solve;
+    t_encode = MPI_Wtime() - t_temp;
 
     /* Take average execution time */
     {
@@ -167,12 +172,13 @@ int main(int argc, char** argv) {
     
     /************************ PBMGS **********************************/
     /* Start timer*/
-    t_solve = MPI_Wtime();
+    MPI_Barrier(glob_comm);
+    t_temp = MPI_Wtime();
 
     pbmgs(Q, R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
 
     /* End timer */
-    t_qr = MPI_Wtime() - t_solve;    
+    t_qr = MPI_Wtime() - t_temp;    
 
     /* Take average execution time */
     {
@@ -180,66 +186,16 @@ int main(int argc, char** argv) {
     MPI_Reduce(&t_qr, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
     t_qr = exec_time / proc_size;
     }
-    
-    /******************** Test Reconstruction ************************/
-    
-    int *row_status = mkl_malloc(proc_rows * sizeof(int), 64);
-    int *col_status = mkl_malloc(proc_rows * sizeof(int), 64);
-
-    if(max_fails > 1) {
-        genFail(Q, R, proc_cols, p_rank, loc_cols, loc_rows);
-        genFail(Q, R, proc_cols + 2, p_rank, loc_cols, loc_rows);
-        genFail(Q, R, 2 * proc_cols, p_rank, loc_cols, loc_rows);
-
-        /* NOTE: Assuming proc_rows = proc_cols */
-        for (int i=0;i<proc_rows;++i) {
-            col_status[i] = 1;
-            row_status[i] = 1;
-        }
-
-        if (p_row == 1) {
-            row_status[0] = 0;
-            if(max_fails > 1) row_status[2] = 0;
-        }
-        if (p_col == 0) {
-            col_status[1] = 0;
-            if(max_fails > 1) col_status[2] = 0;
-        }
-        if (p_col == 2) {
-            col_status[1] = 0;
-        }
-        if (p_row == 2) {
-            row_status[0] = 0;
-        }
-
-    }
-
-    t_postortho = MPI_Wtime();
-
-    reconstructR(R, row_status, p_rank);
-    reconstructQ(Q, col_status, p_rank);
-
-    t_decode = MPI_Wtime() - t_postortho;  
-
-    /* Take average recovery time */
-    {
-    double exec_time;
-    MPI_Reduce(&t_decode, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
-    t_decode = exec_time / proc_size;
-    }  
-    
-    mkl_free(row_status);
-    mkl_free(col_status);
 
     /****************** Check Results of QR **************************/
 
     E = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
 
-    t_solve = MPI_Wtime();
+    t_temp = MPI_Wtime();
     
     error_norm = checkError(A, Q, R, E, loc_cols, loc_rows, glob_cols, glob_rows + check_rows);  
 
-    t_valid = MPI_Wtime() - t_solve;   
+    t_valid = MPI_Wtime() - t_temp;   
 
     /* Take average checking time */
     {
@@ -247,11 +203,13 @@ int main(int argc, char** argv) {
     MPI_Reduce(&t_valid, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
     t_valid = exec_time / proc_size;
     }
+
+    /***************** Post-Orthogonalization ************************/
     
     MPI_Barrier(glob_comm);
-    t_solve = MPI_Wtime();
+    t_temp = MPI_Wtime();
     postOrthogonalize(Q, Gv_tilde, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);   
-    t_postortho = MPI_Wtime() - t_solve;   
+    t_postortho = MPI_Wtime() - t_temp;   
 
     /* Take average checking time */
     {
@@ -270,11 +228,11 @@ int main(int argc, char** argv) {
 
     /******************* Solve linear system *************************/
     if (p_rank == MASTER) {
-        t_solve = MPI_Wtime();
+        t_temp = MPI_Wtime();
         X = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
         cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
         LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
-        t_solve = MPI_Wtime() - t_solve;
+        t_solve = MPI_Wtime() - t_temp;
 
         /* Print all matrices */
         if (glob_cols < 100 && glob_rows < 100) {
@@ -301,6 +259,10 @@ int main(int argc, char** argv) {
         }
     
         /* Print Stats */
+
+        t_decode = recon_info.t_decode;
+        t_qr -= t_decode;
+
         printf("CS Construct Time: %.3g s\n", t_encode);
         printf("PBMGS Time: %.3g s\n", t_qr);
         printf("Node Recovery Time: %.3g s\n", t_decode);
@@ -314,7 +276,7 @@ int main(int argc, char** argv) {
 
         char fname[30];
         if (argc == 5)
-            sprintf(fname, argv[4]);
+            sprintf(fname, argv[3]);
         else
             sprintf(fname, "msc.csv");
 
