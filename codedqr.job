@@ -1,6 +1,5 @@
 #!/bin/bash -l
 #SBATCH --nodes=6 --ntasks-per-node=40 --distribution=cyclic:fcyclic
-# SBATCH --ntasks=100
 
 cd $SLURM_SUBMIT_DIR
 
@@ -8,38 +7,25 @@ cd $SLURM_SUBMIT_DIR
 
 make codedqr
 
-OUTPATH='codedqr-test.csv'
-MULTIPLIER=3000
+OUTPATH="${SLURM_JOB_NAME}-output-${SLURM_JOBID}.csv"
+
+echo "p,n,f,recovery,final solve,post-ortho,cs construct,pbmgs\n" > $OUTPATH
 
 # throwaway to set up mpi
 mpirun -np 196 ./out/codedqr_main 1680 4 msc.csv
 
 for I in {1..10}
 do
-    for X in {1..4}
+    for N in {3000..12000..3000}
     do        
-        mpirun -np 225 ./out/codedqr_main $(( $MULTIPLIER * $X )) 3 $OUTPATH
-        mpirun -np 196 ./out/codedqr_main $(( $MULTIPLIER * $X )) 2 $OUTPATH
-        mpirun -np 169 ./out/codedqr_main $(( $MULTIPLIER * $X )) 1 $OUTPATH
-        mpirun -np 144 ./out/codedqr_main $(( $MULTIPLIER * $X )) 0 $OUTPATH
-
-        mpirun -np 169 ./out/codedqr_main $(( $MULTIPLIER * $X )) 3 $OUTPATH
-        mpirun -np 144 ./out/codedqr_main $(( $MULTIPLIER * $X )) 2 $OUTPATH
-        mpirun -np 121 ./out/codedqr_main $(( $MULTIPLIER * $X )) 1 $OUTPATH
-        mpirun -np 100 ./out/codedqr_main $(( $MULTIPLIER * $X )) 0 $OUTPATH
-        
-        mpirun -np 121 ./out/codedqr_main $(( $MULTIPLIER * $X )) 3 $OUTPATH
-        mpirun -np 100 ./out/codedqr_main $(( $MULTIPLIER * $X )) 2 $OUTPATH
-        mpirun -np 81  ./out/codedqr_main $(( $MULTIPLIER * $X )) 1 $OUTPATH
-        mpirun -np 64  ./out/codedqr_main $(( $MULTIPLIER * $X )) 0 $OUTPATH
-
-        mpirun -np 81  ./out/codedqr_main $(( $MULTIPLIER * $X )) 3 $OUTPATH
-        mpirun -np 64  ./out/codedqr_main $(( $MULTIPLIER * $X )) 2 $OUTPATH
-        mpirun -np 49  ./out/codedqr_main $(( $MULTIPLIER * $X )) 1 $OUTPATH
-        mpirun -np 36  ./out/codedqr_main $(( $MULTIPLIER * $X )) 0 $OUTPATH
-
+        for P in {6..12..2}
+        do
+            for F in {0..3..1}
+            do
+                NP=$(( ($P+$F)**2 ))
+                echo "mpirun -np $NP ./out/codedqr_main $N $F $OUTPATH"
+            done
+        done
     done
+    python test-stats.py $OUTPATH
 done
-
-
-python test-stats.py

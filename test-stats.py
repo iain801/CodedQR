@@ -1,9 +1,11 @@
 import pandas as pd
-import matplotlib.pyplot as plt
+import sys
 from matplotlib.backends.backend_pdf import PdfPages
 
+print(f'making plots from {sys.argv[1]}')
+
 # load csv file into a pandas dataframe
-df = pd.read_csv('codedqr-test.csv')
+df = pd.read_csv(sys.argv[1])
 
 df['total'] = df.iloc[:, 3:].sum(axis=1)
 
@@ -17,7 +19,7 @@ seconds %= 60
 mins %= 60
 hours %= 24
 
-print(f'total time: {days}-{hours}:{mins}:{seconds}')
+print(f'total execution time: {days}-{hours}:{mins}:{seconds}')
 
 
 # Add a new 'tqr' column initialized with the existing 'pbmgs' values
@@ -46,7 +48,7 @@ df['f/p'] = gamma * df['f'] / df['p']
 df['f/n'] = alpha * df['f'] / df['n']
 
 # create a PDF file to save the plots
-pdf_file = 'timing-plots.pdf'
+pdf_file = sys.argv[1].replace('output', 'plots').replace('.csv', '.pdf')
 pdf_pages = PdfPages(pdf_file)
 
 # Get a list of the configuration variables
@@ -67,7 +69,7 @@ total_time.set_ylabel('Time (s)')
 pdf_pages.savefig()
 
 # Create the stacked bar chart for the current configuration value
-overhead = df_means.plot(y=['comp', 'encode', 'post'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
+overhead = df_means.plot(y=['comp', 'encode', 'post'], kind='bar', stacked=True, figsize=(10, 8), yerr=df_std, color=['#fff7ae','#916c80','#ffc6d9'])
 
 # Set the title and axis labels for the plot
 overhead.set_title(f'Overhead Breakdown')
@@ -159,3 +161,5 @@ pdf_pages.savefig()
 
 # close the PDF file
 pdf_pages.close()
+
+print(f'plots saved to {pdf_file}')

@@ -272,19 +272,21 @@ int main(int argc, char** argv) {
         printf("Serial Solve Time: %.3g s\n", t_solve);
         printf("Roundoff Error: %.5g\n", error_norm); 
 
-        if (error_norm > 1e-4) 
-            printf("WARNING: HIGH ERROR \n");
-
         char fname[30];
         if (argc == 4)
             sprintf(fname, argv[3]);
         else
             sprintf(fname, "msc.csv");
 
-        FILE *log = fopen(fname,"a");
-        fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
-            proc_rows-max_fails, glob_rows, max_fails, t_decode, t_solve, t_postortho, t_encode, t_qr);
-        fclose(log);
+        if (error_norm > 1e-4) {
+            printf("WARNING: HIGH ERROR \n");
+        }
+        else {
+            FILE *log = fopen(fname,"a");
+            fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
+                proc_rows-max_fails, glob_rows, max_fails, t_decode, t_solve, t_postortho, t_encode, t_qr);
+            fclose(log);
+        }
 
         mkl_free(B);
         mkl_free(X);

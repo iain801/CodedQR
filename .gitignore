@@ -67,4 +67,5 @@ log_*.txt
 out/*
 *.pdf
 *.csv
-*_test.*
+codedqr_test.c
+test.job
