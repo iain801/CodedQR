@@ -1,5 +1,19 @@
 #!/bin/bash -l
-#SBATCH --nodes=6 --ntasks-per-node=40 --distribution=cyclic:fcyclic
+
+#SBATCH --job-name=codedqr
+#SBATCH --partition=batch
+
+#SBATCH --mail-type=begin
+#SBATCH --mail-type=end
+#SBATCH --mail-type=fail
+#SBATCH --mail-user=ixw@ucsb.edu
+
+#SBATCH --ntasks-per-node=40
+#SBATCH --nodes=6
+#SBATCH --ntasks-per-core=1
+#SBATCH --distribution=cyclic:fcyclic:fcyclic,NoPack
+#SBATCH --mem-per-cpu=4G
+
 
 cd $SLURM_SUBMIT_DIR
 
@@ -7,12 +21,13 @@ cd $SLURM_SUBMIT_DIR
 
 make codedqr
 
-OUTPATH="${SLURM_JOB_NAME}-output-${SLURM_JOBID}.csv"
+DATA_PATH="data/${SLURM_JOB_NAME}-data-${SLURM_JOBID}.csv"
+PLOT_PATH="plots/${SLURM_JOB_NAME}-plots-${SLURM_JOBID}.pdf"
 
-echo "p,n,f,recovery,final solve,post-ortho,cs construct,pbmgs\n" > $OUTPATH
+echo "p,n,f,recovery,final solve,post-ortho,cs construct,pbmgs" > $DATA_PATH
 
 # throwaway to set up mpi
-mpirun -np 196 ./out/codedqr_main 1680 4 msc.csv
+mpirun -np 225 ./out/codedqr_main 1200 3 msc.csv
 
 for I in {1..10}
 do
@@ -23,9 +38,11 @@ do
             for F in {0..3..1}
             do
                 NP=$(( ($P+$F)**2 ))
-                echo "mpirun -np $NP ./out/codedqr_main $N $F $OUTPATH"
+                mpirun -np $NP ./out/codedqr_main $N $F $DATA_PATH
+            
             done
         done
     done
-    python test-stats.py $OUTPATH
+    python test-stats.py $DATA_PATH $PLOT_PATH
+
 done

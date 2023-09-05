@@ -281,12 +281,12 @@ int main(int argc, char** argv) {
         if (error_norm > 1e-4) {
             printf("WARNING: HIGH ERROR \n");
         }
-        else {
-            FILE *log = fopen(fname,"a");
-            fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
-                proc_rows-max_fails, glob_rows, max_fails, t_decode, t_solve, t_postortho, t_encode, t_qr);
-            fclose(log);
-        }
+        
+        FILE *log = fopen(fname,"a");
+        fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
+            proc_rows-max_fails, glob_rows, max_fails, t_decode, t_solve, t_postortho, t_encode, t_qr);
+        fclose(log);
+        
 
         mkl_free(B);
         mkl_free(X);

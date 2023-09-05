@@ -2,10 +2,13 @@ import pandas as pd
 import sys
 from matplotlib.backends.backend_pdf import PdfPages
 
-print(f'making plots from {sys.argv[1]}')
+inpath = sys.argv[1]
+outpath = sys.argv[2]
+
+print(f'making plots from {inpath}')
 
 # load csv file into a pandas dataframe
-df = pd.read_csv(sys.argv[1])
+df = pd.read_csv(inpath)
 
 df['total'] = df.iloc[:, 3:].sum(axis=1)
 
@@ -20,7 +23,6 @@ mins %= 60
 hours %= 24
 
 print(f'total execution time: {days}-{hours}:{mins}:{seconds}')
-
 
 # Add a new 'tqr' column initialized with the existing 'pbmgs' values
 df['tqr'] = df['pbmgs']
@@ -48,8 +50,7 @@ df['f/p'] = gamma * df['f'] / df['p']
 df['f/n'] = alpha * df['f'] / df['n']
 
 # create a PDF file to save the plots
-pdf_file = sys.argv[1].replace('output', 'plots').replace('.csv', '.pdf')
-pdf_pages = PdfPages(pdf_file)
+pdf_pages = PdfPages(outpath)
 
 # Get a list of the configuration variables
 config_cols = ['n', 'p', 'f']
@@ -57,8 +58,8 @@ config_cols = ['n', 'p', 'f']
 df_means = df.groupby(config_cols)[df.columns[3:]].mean()
 df_std = df.groupby(config_cols)[df.columns[3:]].std()
 
-# Create the stacked bar chart for the current configuration value
-total_time = df_means.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), yerr=df_std, color=['#ef6f6c','#8963ba','#90c290'])
+# Create the bar chart for the current configuration value
+total_time = df_means.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), yerr=df_std, color=['#ef6f6c','#8963ba','#90c290','#51AEF0'])
 
 # Set the title and axis labels for the plot
 total_time.set_title(f'Total Execution Time')
@@ -81,8 +82,8 @@ pdf_pages.savefig()
 df_means = df.groupby(config_cols[1:])[df.columns[3:]].mean()
 df_std = df.groupby(config_cols[1:])[df.columns[3:]].std()
 
-# Create the stacked bar chart for the current configuration value
-total_time = df_means.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), color=['#ef6f6c','#8963ba','#90c290'])
+# Create the bar chart for the current configuration value
+total_time = df_means.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), color=['#ef6f6c','#8963ba','#90c290','#51AEF0'])
 
 # Set the title and axis labels for the plot
 total_time.set_title(f'Total Execution Time')
@@ -113,17 +114,6 @@ overhead3.set_ylabel('Proportion of  Tqr')
 
 # Save the figure to a PDF file
 pdf_pages.savefig()
-
-# # Create the stacked bar chart for the current configuration value
-# overhead3 = df_means.plot(y=['cs construct'], kind='bar', stacked=True, figsize=(10, 8), color=['#916c80'])
-
-# # Set the title and axis labels for the plot
-# overhead3.set_title(f'Absolute Encoding')
-# overhead3.set_xlabel(', '.join(config_cols))
-# overhead3.set_ylabel('Time (s)')
-
-# # Save the figure to a PDF file
-# pdf_pages.savefig()
 
 # Create the stacked bar chart for the current configuration value
 estimate = df_means.plot(y=['f/p'], kind='bar', stacked=False, figsize=(10, 8), color=['#916c80'])
@@ -162,4 +152,4 @@ pdf_pages.savefig()
 # close the PDF file
 pdf_pages.close()
 
-print(f'plots saved to {pdf_file}')
+print(f'plots saved to {outpath}')
