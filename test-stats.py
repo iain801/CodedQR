@@ -10,7 +10,7 @@ print(f'making plots from {inpath}')
 # load csv file into a pandas dataframe
 df = pd.read_csv(inpath)
 
-df['total'] = df.iloc[:, 3:].sum(axis=1)
+df['total'] = df.iloc[:, 3:].sum(axis=1) - df['recovery']
 
 df = df[['n', 'p', 'f', 'recovery','final solve','post-ortho','cs construct','pbmgs','total']]
 
@@ -79,74 +79,44 @@ overhead.set_ylabel('Proportion of  Tqr')
 
 pdf_pages.savefig()
 
+for n_val in df['n'].unique():
+    
+    n_rows = df_means.query(f"n == {n_val}")
+    
+    # Create the bar chart for the current configuration value
+    total_time_n = n_rows.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), color=['#ef6f6c','#8963ba','#90c290','#51AEF0'])
+
+    # Set the title and axis labels for the plot
+    total_time_n.set_title(f'Total Execution Time n = {n_val}')
+    total_time_n.set_xlabel(', '.join(config_cols))
+    total_time_n.set_ylabel('Time (s)')
+
+    # Save the figure to a PDF file
+    pdf_pages.savefig()
+
+    # Create the stacked bar chart for the current configuration value
+    overhead_n = n_rows.plot(y=['comp', 'encode', 'post'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
+
+    # Set the title and axis labels for the plot
+    overhead_n.set_title(f'Overhead Breakdown n={n_val}, p, f')
+    overhead_n.set_xlabel(', '.join(config_cols))
+    overhead_n.set_ylabel('Proportion of  Tqr')
+
+    # Save the figure to a PDF file
+    pdf_pages.savefig()
+
 df_means = df.groupby(config_cols[1:])[df.columns[3:]].mean()
 df_std = df.groupby(config_cols[1:])[df.columns[3:]].std()
-
-# Create the bar chart for the current configuration value
-total_time = df_means.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), color=['#ef6f6c','#8963ba','#90c290','#51AEF0'])
-
-# Set the title and axis labels for the plot
-total_time.set_title(f'Total Execution Time')
-total_time.set_xlabel(', '.join(config_cols))
-total_time.set_ylabel('Time (s)')
-
-# Save the figure to a PDF file
-pdf_pages.savefig()
-
-# Create the stacked bar chart for the current configuration value
-overhead2 = df_means.plot(y=['comp', 'encode', 'post'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
-
-# Set the title and axis labels for the plot
-overhead2.set_title(f'Overhead Breakdown p, f')
-overhead2.set_xlabel(', '.join(config_cols))
-overhead2.set_ylabel('Proportion of  Tqr')
-
-# Save the figure to a PDF file
-pdf_pages.savefig()
-
-# Create the stacked bar chart for the current configuration value
-overhead3 = df_means.plot(y=['encode', 'post'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80'])
-
-# Set the title and axis labels for the plot
-overhead3.set_title(f'Coding Breakdown')
-overhead3.set_xlabel(', '.join(config_cols))
-overhead3.set_ylabel('Proportion of  Tqr')
-
-# Save the figure to a PDF file
-pdf_pages.savefig()
-
-# Create the stacked bar chart for the current configuration value
-estimate = df_means.plot(y=['f/p'], kind='bar', stacked=False, figsize=(10, 8), color=['#916c80'])
-
-# Set the title and axis labels for the plot
-estimate.set_title(f'Coding Estimates ({gamma} * f/p)')
-estimate.set_xlabel(', '.join(config_cols))
-estimate.set_ylabel('Proportion of  Tqr')
-
-pdf_pages.savefig()
-
-df_means = df.groupby(['n','f'])[df.columns[3:]].mean()
-df_std = df.groupby(['n','f'])[df.columns[3:]].std()
 
 # Create the stacked bar chart for the current configuration value
 overhead2 = df_means.plot(y=['encode', 'decode'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
 
 # Set the title and axis labels for the plot
-overhead2.set_title(f'Overhead Breakdown n, f')
+overhead2.set_title(f'Encode and Reocvery Breakdown p, f')
 overhead2.set_xlabel(', '.join(config_cols))
 overhead2.set_ylabel('Proportion of  Tqr')
 
 # Save the figure to a PDF file
-pdf_pages.savefig()
-
-# Create the stacked bar chart for the current configuration value
-estimate2 = df_means.plot(y=['f/n'], kind='bar', stacked=False, figsize=(10, 8), color=['#ffc6d9'])
-
-# Set the title and axis labels for the plot
-estimate2.set_title(f'Coding Estimates ({alpha} * f/n)')
-estimate2.set_xlabel(', '.join(config_cols))
-estimate2.set_ylabel('Proportion of  Tqr')
-
 pdf_pages.savefig()
 
 # close the PDF file
