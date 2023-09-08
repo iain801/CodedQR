@@ -26,6 +26,7 @@
 #define COMP_R 3        /* code for mpi send/recv */
 
 #define DEBUG 0         /* run in debug mode */
+#define TEST_FAILIURE 1 /* test failiure and reconstruction */
 #define SET_SEED 0      /* choose random seed, time-based if 0 */
 
 VSLStreamStatePtr stream;

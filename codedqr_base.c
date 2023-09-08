@@ -299,27 +299,27 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
     }  
     
     if (reg_fails) {
+        /* fill node maps with first m active nodes */
+        for (i=0, j=0; j < m; ++i) {
+            if (!node_status[i]) {
+                first_m_nodes_i[i] = j;
+                first_m_nodes[j++] = i;
+            }
+            /* if node is failed, set inverse map to -1 */
+            else {
+                first_m_nodes_i[i] = -1;
+            }
+        }
+
+        /* finish filling inverse map with -1 */
+        for (;i<recon_info.proc_rows;++i) {
+            first_m_nodes_i[i] = -1;
+        }
+
         /* if node is active */
         if (!node_status[p_row]) {
 
             /*********** Compute Success Matrix ****************/
-
-            /* fill node maps with first m active nodes */
-            for (i=0, j=0; j < m; ++i) {
-                if (!node_status[i]) {
-                    first_m_nodes_i[i] = j;
-                    first_m_nodes[j++] = i;
-                }
-                /* if node is failed, set inverse map to -1 */
-                else {
-                    first_m_nodes_i[i] = -1;
-                }
-            }
-
-            /* finish filling inverse map with -1 */
-            for (;i<recon_info.proc_rows;++i) {
-                first_m_nodes_i[i] = -1;
-            }
 
             for (i=0; i < m; ++i) {
                 /* if regular node, set Gv_succ to 1 */
@@ -348,9 +348,10 @@ void reconstructQ(double* Q, int* node_status, int p_rank) {
                 if(first_m_nodes_i[p_row] > -1) {
 
                     /* Copy Gv_succ * Q to Qbar*/
-                    cblas_daxpby(recon_info.loc_rows * recon_info.loc_cols, Gv_succ[i * n + first_m_nodes_i[p_row]], 
-                        Q, 1, 0, Q_bar, 1);
- 
+                    cblas_daxpby(recon_info.loc_rows * recon_info.loc_cols, 
+                        Gv_succ[i * n + first_m_nodes_i[p_row]], 
+                        Q, 1, 0, Q_bar, 1);                   
+    
                 }
                 MPI_Reduce(Q_bar, Q, recon_info.loc_cols * recon_info.loc_rows, MPI_DOUBLE, MPI_SUM, i, col_comm);
                 for (j=recon_info.loc_cols * recon_info.loc_rows-1; j >=0; --j) { Q_bar[j] = 0; }
@@ -396,26 +397,26 @@ void reconstructR(double* R, int* node_status, int p_rank) {
 
     /* if node is active */
     if (reg_fails) {
+        /* fill node maps with first n active nodes */
+        for (i=0, j=0; j < n; ++i) {
+            if (!node_status[i]) {
+                first_n_nodes_i[i] = j;
+                first_n_nodes[j++] = i;
+            }
+            /* if node is failed, set inverse map to -1 */
+            else {
+                first_n_nodes_i[i] = -1;
+            }
+        }
+
+        /* finish filling inverse map with -1 */
+        for (;i<recon_info.proc_cols;++i) {
+            first_n_nodes_i[i] = -1;
+        }
+
         if (!node_status[p_col]) {
 
             /*********** Compute Success Matrix ****************/
-
-            /* fill node maps with first n active nodes */
-            for (i=0, j=0; j < n; ++i) {
-                if (!node_status[i]) {
-                    first_n_nodes_i[i] = j;
-                    first_n_nodes[j++] = i;
-                }
-                /* if node is failed, set inverse map to -1 */
-                else {
-                    first_n_nodes_i[i] = -1;
-                }
-            }
-
-            /* finish filling inverse map with -1 */
-            for (;i<recon_info.proc_cols;++i) {
-                first_n_nodes_i[i] = -1;
-            }
 
             for (i=0; i < n; ++i) {
                 /* if regular node, set Gh_succ to 1 */
@@ -444,7 +445,8 @@ void reconstructR(double* R, int* node_status, int p_rank) {
                 if(first_n_nodes_i[p_col] > -1) {
 
                     /* Copy Gh_succ * R to Rbar*/
-                    cblas_daxpby(recon_info.loc_rows * recon_info.loc_cols, Gh_succ[n * first_n_nodes_i[p_col] + i], 
+                    cblas_daxpby(recon_info.loc_rows * recon_info.loc_cols, 
+                        Gh_succ[n * first_n_nodes_i[p_col] + i], 
                         R, 1, 0, R_bar, 1);
                 } 
                 MPI_Reduce(R_bar, R, recon_info.loc_cols * recon_info.loc_rows, MPI_DOUBLE, MPI_SUM, i, row_comm); 
@@ -489,36 +491,37 @@ void pbmgs(double* Q, double* R, int p_rank,
         i = APC * loc_cols;
 
         /* Test Reconstruction */
-        MPI_Barrier(glob_comm);
-        double t_temp = MPI_Wtime();
+        if (TEST_FAILIURE) {
+            MPI_Barrier(glob_comm);
+            double t_temp = MPI_Wtime();
 
-        for (int z=0; z < proc_cols; ++z) {
-            row_status[z] = 0;
-            col_status[z] = 0;
+            for (int z=0; z < proc_cols; ++z) {
+                row_status[z] = 0;
+                col_status[z] = 0;
+            }
+
+            for (int z=0; z < recon_info.max_fails; ++z) {
+                if (proc_cols - p_row - z > 0)
+                    row_status[proc_cols - p_row - z - 1] = 1;
+
+                if (proc_rows - p_col - z > 0)
+                    col_status[proc_rows - p_col - z - 1] = 1;
+            }
+
+            genFail(Q, R, col_status, row_status, p_rank);
+
+            reconstructR(R, row_status, p_rank);
+            reconstructQ(Q, col_status, p_rank);
+
+            t_temp = MPI_Wtime() - t_temp;  
+
+            /* Take average recovery time */
+            {
+            double exec_time;
+            MPI_Reduce(&t_temp, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
+            recon_info.t_decode += exec_time / (proc_rows * proc_cols);
+            }  
         }
-
-        for (int z=0; z < recon_info.max_fails; ++z) {
-            if (proc_cols - p_row - z > 0)
-                row_status[proc_cols - p_row - z - 1] = 1;
-
-            if (proc_rows - p_col - z > 0)
-                col_status[proc_rows - p_col - z - 1] = 1;
-        }
-
-        genFail(Q, R, col_status, row_status, p_rank);
-
-        reconstructR(R, row_status, p_rank);
-        reconstructQ(Q, col_status, p_rank);
-
-        t_temp = MPI_Wtime() - t_temp;  
-
-        /* Take average recovery time */
-        {
-        double exec_time;
-        MPI_Reduce(&t_temp, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
-        recon_info.t_decode += exec_time / (proc_rows * proc_cols);
-        }  
-        
         /* Back to algorithm */
 
         /* ICGS Step */

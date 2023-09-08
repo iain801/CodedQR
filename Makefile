@@ -1,5 +1,5 @@
 EXECS= codedqr_base codedqr_main pbmgs_mpi
-MPICC?=mpiicc 
+MPICC?=mpicc 
 CC = icc
 IDIR = ${MKLROOT}/include
 LDIR = ${MKLROOT}/lib/intel64

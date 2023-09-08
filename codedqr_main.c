@@ -40,10 +40,14 @@ int main(int argc, char** argv) {
             *E;                 /* error matrix */
     
     int nrhs = 1;
+
     /*********************** Initialize MPI *****************************/
 
     MPI_Init (&argc, &argv);
     MPI_Comm_dup(MPI_COMM_WORLD, &glob_comm);
+    
+    if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, SET_SEED);
+    else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
 
     MPI_Comm_size(glob_comm, &proc_size);
     MPI_Comm_rank(glob_comm, &p_rank);  
@@ -67,7 +71,7 @@ int main(int argc, char** argv) {
     MPI_Comm_group(row_comm, &row_group);
     MPI_Comm_group(col_comm, &col_group);
 
-    /******************* Initialize arrays ***************************/
+    // /******************* Initialize arrays ***************************/
 
     if (p_rank == MASTER)
     {
@@ -76,9 +80,6 @@ int main(int argc, char** argv) {
         printf("There are %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
         printf("Local matrix dimensions: %d x %d\n\n", loc_cols, loc_rows);
 
-        /* Generate random matrix */
-        if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, SET_SEED);
-        else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
         randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
 
         /* Limit generated A precision to 5 decimal places */
@@ -129,12 +130,11 @@ int main(int argc, char** argv) {
 
     recon_info.t_decode = 0.0;
 
+    /******************* Generate Gv and Gh **************************/
     /* Start timer*/
     MPI_Barrier(glob_comm);
-    t_temp = MPI_Wtime();
+    t_temp = MPI_Wtime(); 
 
-    /******************* Generate Gv and Gh **************************/
-        
     /* Construct Gh and Gv in master node and broadcast */
     if (p_rank == MASTER) {
         constructGh(Gh_tilde, proc_cols, max_fails);
@@ -154,7 +154,6 @@ int main(int argc, char** argv) {
 
     /******************* Q-Factor Checksums **************************/
 
-    //WHERE THE ERROR OCCURS
     checksumV(Q, p_rank);
 
     /* End timer */

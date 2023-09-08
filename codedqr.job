@@ -8,12 +8,16 @@
 #SBATCH --mail-type=fail
 #SBATCH --mail-user=ixw@ucsb.edu
 
-#SBATCH --ntasks-per-node=40
+#SBATCH --ntasks=240
 #SBATCH --nodes=6
-#SBATCH --ntasks-per-core=1
 #SBATCH --distribution=cyclic:fcyclic:fcyclic,NoPack
 #SBATCH --mem-per-cpu=4G
 
+module purge
+module load openmpi/4.1.1
+module load pmix/2.1.1
+module load mkl/latest
+module load gnu/5.4.0
 
 cd $SLURM_SUBMIT_DIR
 
@@ -21,13 +25,16 @@ cd $SLURM_SUBMIT_DIR
 
 make codedqr
 
+export OMPI_MCA_btl_openib_allow_ib=true
+SRUN_FLAGS="--mpi=pmix_v2 --exclusive"
+
 DATA_PATH="data/${SLURM_JOB_NAME}-data-${SLURM_JOBID}.csv"
 PLOT_PATH="plots/${SLURM_JOB_NAME}-plots-${SLURM_JOBID}.pdf"
 
 echo "p,n,f,recovery,final solve,post-ortho,cs construct,pbmgs" > $DATA_PATH
 
 # throwaway to set up mpi
-mpirun -np 225 ./out/codedqr_main 1200 3 msc.csv
+srun --mpi=pmix_v2 -n 225 ./out/codedqr_main 1200 3 msc.csv
 
 for I in {1..10}
 do
@@ -38,11 +45,11 @@ do
             for F in {0..3..1}
             do
                 NP=$(( ($P+$F)**2 ))
-                mpirun -np $NP ./out/codedqr_main $N $F $DATA_PATH
-            
+                srun $SRUN_FLAGS -m plane=$P -n $NP ./out/codedqr_main $N $F $DATA_PATH &
             done
         done
     done
+    wait
     python test-stats.py $DATA_PATH $PLOT_PATH
 
 done
