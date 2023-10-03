@@ -9,10 +9,6 @@
 #ifndef CODEDQR_BASE   /* Include guard */
 #define CODEDQR_BASE
 
-#define MKL_INT int
-#define MKL_DOUBLE double
-#define cblas_d double
-
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
@@ -29,9 +25,8 @@
 #define TEST_FAILIURE 1 /* test failiure and reconstruction */
 #define SET_SEED 0      /* choose random seed, time-based if 0 */
 
-VSLStreamStatePtr stream;
-MPI_Comm glob_comm, row_comm, col_comm;
-MPI_Group row_group, col_group;
+extern VSLStreamStatePtr stream;
+extern MPI_Comm glob_comm, row_comm, col_comm;
 
 struct ReconInfo {
     double *Gv_tilde, *Gh_tilde, t_decode;
@@ -39,7 +34,7 @@ struct ReconInfo {
         max_fails, loc_cols, loc_rows;
 };
 
-struct ReconInfo recon_info;
+extern struct ReconInfo recon_info;
 
 void printMatrix(double* matrix, int cols, int rows);
 

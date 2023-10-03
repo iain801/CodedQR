@@ -16,6 +16,9 @@
 
 #include "codedqr_base.h"
 
+#define CHECK_ERROR 0   /* check fp error */
+#define USE_MASTER 0   /* generate and collect global on MASTER */ 
+
 int main(int argc, char** argv) {
     
     int	proc_size,              /* total number of processes */
@@ -27,7 +30,7 @@ int main(int argc, char** argv) {
         max_fails,              /* maximum tolerable failiures (f in literature) */
         check_cols, check_rows; /* checksum rows/columns */
 
-    double  *A, *Q, *R,         /* main i/o matrices */
+    double  *A = NULL, *Q, *R,  /* main i/o matrices */
             *Gv_tilde,          /* Q Factor generator matrix */
             *Gh_tilde;          /* R Factor generator matrix */
 
@@ -35,22 +38,54 @@ int main(int argc, char** argv) {
             t_postortho,        /* timer */
             t_valid, t_temp,    /* timer */
             t_decode, t_encode, /* timer */
-            error_norm,         /* norm of error matrix */
+            error_norm = 0,     /* norm of error matrix */
             *X, *B,             /* linear system results */
             *E;                 /* error matrix */
-    
-    int nrhs = 1;
 
-    /*********************** Initialize MPI *****************************/
+    int seed = SET_SEED;
 
-    MPI_Init (&argc, &argv);
-    MPI_Comm_dup(MPI_COMM_WORLD, &glob_comm);
+    /******************** Initialize MPI *****************************/
+
+    MPI_Init(&argc, &argv);
+
+    /**************** Shuffle process ranks **************************/
+
+    MPI_Group glob_group, glob_group_reordered;
+    MPI_Comm_group(MPI_COMM_WORLD, &glob_group);
+    MPI_Group_size(glob_group, &proc_size);
+    MPI_Group_rank(glob_group, &p_rank); 
+
+    if (!seed && p_rank == MASTER) {
+        seed = MPI_Wtime() * 8888.8;
+    }
+ 
+    MPI_Bcast(&seed, 1, MPI_INT, MASTER, MPI_COMM_WORLD);
     
-    if(SET_SEED) vslNewStream(&stream, VSL_BRNG_SFMT19937, SET_SEED);
-    else vslNewStream(&stream, VSL_BRNG_SFMT19937, MPI_Wtime());
+    vslNewStream(&stream, VSL_BRNG_SFMT19937, seed);
+
+    int* shuffled_ranks = mkl_malloc(proc_size * sizeof(int), 64);
+    for (int i=0; i < proc_size; ++i) shuffled_ranks[i] = i;
+
+    int swap = 0;
+    for (int i=0; i < proc_size; ++i) {
+        viRngUniform(VSL_RNG_METHOD_UNIFORM_STD, stream, 1, &swap, i, proc_size);
+        int temp = shuffled_ranks[swap];
+        shuffled_ranks[swap] = shuffled_ranks[i];
+        shuffled_ranks[i] = temp;
+    }
+
+    MPI_Group_incl(glob_group, proc_size, shuffled_ranks, &glob_group_reordered);
+    MPI_Comm_create(MPI_COMM_WORLD, glob_group_reordered, &glob_comm);
 
     MPI_Comm_size(glob_comm, &proc_size);
-    MPI_Comm_rank(glob_comm, &p_rank);  
+    MPI_Comm_rank(glob_comm, &p_rank); 
+
+    MPI_Group_free(&glob_group);
+    MPI_Group_free(&glob_group_reordered);
+
+    mkl_free(shuffled_ranks);
+
+    /************ Set Configuration Variables ************************/
 
     glob_cols = glob_rows = atoi(argv[1]);
     max_fails = atoi(argv[2]);
@@ -68,50 +103,54 @@ int main(int argc, char** argv) {
 
     MPI_Comm_split(glob_comm, p_col, p_rank, &col_comm);
     MPI_Comm_split(glob_comm, p_row, p_rank, &row_comm);
-    MPI_Comm_group(row_comm, &row_group);
-    MPI_Comm_group(col_comm, &col_group);
 
-    // /******************* Initialize arrays ***************************/
+    /******************* Initialize arrays ***************************/
 
     if (p_rank == MASTER)
     {
-        A = mkl_calloc((glob_cols + check_cols) * (glob_rows + check_rows), sizeof(double), 64);
         printf("mpirun -np %d ./out/codedqr_main %d %d\n", proc_size, glob_cols, max_fails);
         printf("There are %d tasks in %d rows and %d columns\n", proc_size, proc_rows, proc_cols);
         printf("Local matrix dimensions: %d x %d\n\n", loc_cols, loc_rows);
+        fflush(stdout);
 
-        randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
+        if (USE_MASTER) {
+            A = mkl_calloc((glob_cols + check_cols) * (glob_rows + check_rows), sizeof(double), 64);
+            randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
+            
+            /* Limit generated A precision to 5 decimal places */
+            for (int i=0; i < glob_rows * glob_cols; i++) {
+                A[i] = roundf(A[i] * 1e5);
+                A[i] = A[i] * 1e-5;
+            }
+            
+            // for (int i = 0; i < glob_cols; ++i) {
+            //     for (int j = 0; j < glob_rows; j++) {
+            //         A[i * (glob_cols + check_cols) + j] = (i == j) ? 1 : 0;
+            //     }
+            // }
 
-        /* Limit generated A precision to 5 decimal places */
-        for (int i=0; i < glob_rows * glob_cols; i++) {
-            A[i] = roundf(A[i] * 1e5);
-            A[i] = A[i] * 1e-5;
+            if(DEBUG) {
+                printf("Initializing array A: \n");
+                printMatrix(A, glob_cols + check_cols, glob_rows + check_rows);
+            }
         }
-
-        B = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
-        randMatrix(B, glob_rows, nrhs);
-
-        /* Limit generated B precision to 5 decimal places */
-        for (int i=0; i < glob_rows * nrhs; i++) {
-            B[i] = roundf(B[i] * 1e5);
-            B[i] = B[i] * 1e-5;
-        }
-
-        if(DEBUG) {
-            printf("Initializing array A: \n");
-            printMatrix(A, glob_cols + check_cols, glob_rows + check_rows);
-        }
+        
     }
 
     /************* Distribute A across process Q *********************/
 
     Q = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
     R = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
-    
-    scatterA(A, Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);
 
-    if (p_rank == MASTER) mkl_free(A);
+    if(USE_MASTER) {
+        scatterA(A, Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);
+        if (p_rank == MASTER) mkl_free(A);
+    }
+    else if (p_col < proc_cols - max_fails && p_row < proc_rows - max_fails) {
+        randMatrix(Q, loc_cols, loc_rows);
+    }
     A = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
+    
 
     /***************** Setup recon_info Struct ************************/
 
@@ -138,7 +177,7 @@ int main(int argc, char** argv) {
     /* Construct Gh and Gv in master node and broadcast */
     if (p_rank == MASTER) {
         constructGh(Gh_tilde, proc_cols, max_fails);
-        constructGv(Gv_tilde, proc_cols, max_fails);
+        constructGv(Gv_tilde, proc_rows, max_fails);
     }
     
     MPI_Bcast(Gh_tilde, max_fails * (proc_cols - max_fails), MPI_DOUBLE, MASTER, glob_comm);
@@ -187,13 +226,16 @@ int main(int argc, char** argv) {
     t_qr = exec_time / proc_size;
     }
 
-    /****************** Check Results of QR **************************/
+    /********************* Check A = QR ******************************/
 
     E = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
-
-    t_temp = MPI_Wtime();
     
-    error_norm = checkError(A, Q, R, E, loc_cols, loc_rows, glob_cols, glob_rows + check_rows);  
+    t_temp = MPI_Wtime();
+
+    if (CHECK_ERROR) {
+        error_norm = checkError(A, Q, R, E, loc_cols, loc_rows, 
+            glob_cols, glob_rows + check_rows);  
+    }
 
     t_valid = MPI_Wtime() - t_temp;   
 
@@ -205,13 +247,14 @@ int main(int argc, char** argv) {
     }
 
     /***************** Post-Orthogonalization ************************/
+
     
     MPI_Barrier(glob_comm);
     t_temp = MPI_Wtime();
     postOrthogonalize(Q, Gv_tilde, p_rank, proc_cols, proc_rows, loc_cols, loc_rows, max_fails);   
     t_postortho = MPI_Wtime() - t_temp;   
 
-    /* Take average checking time */
+    /* Take average execution time */
     {
     double exec_time;
     MPI_Reduce(&t_postortho, &exec_time, 1, MPI_DOUBLE, MPI_SUM, MASTER, glob_comm);
@@ -221,41 +264,63 @@ int main(int argc, char** argv) {
         
     /*********** Compile Q and R from local blocks *******************/
 
-    gatherA(&A, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
-    gatherA(&Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
-    gatherA(&R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
-    gatherA(&E, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+    if (USE_MASTER) {
+        gatherA(&A, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+        gatherA(&Q, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+        gatherA(&R, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+        gatherA(&E, p_rank, proc_cols, proc_rows, loc_cols, loc_rows);
+    }
 
     /******************* Solve linear system *************************/
     if (p_rank == MASTER) {
-        t_temp = MPI_Wtime();
-        X = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
-        cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
-        LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
-        t_solve = MPI_Wtime() - t_temp;
+        if (USE_MASTER) {
+            int nrhs = 1;
 
-        /* Print all matrices */
-        if (glob_cols < 100 && glob_rows < 100) {
-            printf("\n");
-            printf("Matrix A:\n");
-            printMatrix(A, glob_cols, glob_rows + check_rows);
+            X = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
+            B = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
+            randMatrix(B, glob_rows, nrhs);
 
-            if (fabs(error_norm) > 1e-4) {
-                printf("Matrix B:\n");
-                printMatrix(E, glob_cols, glob_rows + check_rows);
+            /* Limit generated B precision to 5 decimal places */
+            for (int i=0; i < glob_rows * nrhs; i++) {
+                B[i] = roundf(B[i] * 1e5);
+                B[i] = B[i] * 1e-5;
             }
+            
+            t_temp = MPI_Wtime();
 
-            printf("Matrix Q:\n");
-            printMatrix(Q, glob_cols, glob_rows + check_rows);
+            cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
+            LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
 
-            printf("Matrix R:\n");
-            printMatrix(R, glob_cols, glob_rows + check_rows);
+            t_solve = MPI_Wtime() - t_temp;
 
-            printf("Matrix B:\n");
-            printMatrix(B, nrhs, glob_rows);
+            /* Print all matrices */
+            if (glob_cols < 100 && glob_rows < 100) {
+                printf("\n");
+                printf("Matrix A:\n");
+                printMatrix(A, glob_cols, glob_rows + check_rows);
 
-            printf("Matrix X:\n");
-            printMatrix(X, nrhs, glob_rows);
+                if (fabs(error_norm) > 1e-4) {
+                    printf("Matrix E:\n");
+                    printMatrix(E, glob_cols, glob_rows + check_rows);
+                }
+
+                printf("Matrix Q:\n");
+                printMatrix(Q, glob_cols, glob_rows + check_rows);
+
+                printf("Matrix R:\n");
+                printMatrix(R, glob_cols, glob_rows + check_rows);
+
+                printf("Matrix B:\n");
+                printMatrix(B, nrhs, glob_rows);
+
+                printf("Matrix X:\n");
+                printMatrix(X, nrhs, glob_rows);
+
+                fflush(stdout);
+            }
+            
+            mkl_free(B);
+            mkl_free(X);
         }
     
         /* Print Stats */
@@ -270,26 +335,21 @@ int main(int argc, char** argv) {
         printf("Post-Ortho Time: %.3g s\n", t_postortho);
         printf("Serial Solve Time: %.3g s\n", t_solve);
         printf("Roundoff Error: %.5g\n", error_norm); 
-
-        char fname[30];
-        if (argc == 4)
-            sprintf(fname, argv[3]);
-        else
-            sprintf(fname, "msc.csv");
-
         if (error_norm > 1e-4) {
             printf("WARNING: HIGH ERROR \n");
         }
-        
-        FILE *log = fopen(fname,"a");
-        fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
-            proc_rows-max_fails, glob_rows, max_fails, t_decode, t_solve, t_postortho, t_encode, t_qr);
-        fclose(log);
-        
-
-        mkl_free(B);
-        mkl_free(X);
         printf("\n\n");
+        fflush(stdout);
+
+        if (argc == 4) {
+            char fname[30];
+            sprintf(fname, "%s", argv[3]);
+            FILE *log = fopen(fname,"a");
+            fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
+                proc_rows-max_fails, glob_rows, max_fails, t_decode, t_solve, t_postortho, t_encode, t_qr);
+            fclose(log);
+        }
+        
     }
 
     mkl_free(Gv_tilde);
@@ -298,14 +358,14 @@ int main(int argc, char** argv) {
     mkl_free(Q);
     mkl_free(R);
     mkl_free(E);
+    
+    mkl_free_buffers();
 
     MPI_Comm_free(&glob_comm);
     MPI_Comm_free(&row_comm);
     MPI_Comm_free(&col_comm);
-    MPI_Group_free(&row_group);
-    MPI_Group_free(&col_group);
 
-    mkl_free_buffers();
     MPI_Finalize();
+
     return 0;
 }
