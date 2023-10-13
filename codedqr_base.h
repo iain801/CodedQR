@@ -1,11 +1,3 @@
-/* Coded Parallel Block Modified Gram Schmidt
- * implementation with MPI using [INSERT] checksum storage
- * for random square matrix A(n,n)
- * Using MGS in place of ICGS 
- *
- * Iain Weissburg 2023
- */
-
 #ifndef CODEDQR_BASE   /* Include guard */
 #define CODEDQR_BASE
 

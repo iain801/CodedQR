@@ -3,16 +3,13 @@
  * Using MGS in place of ICGS 
  * Takes arguements of: 
  *      np = (From MPI) number of processes/submatrices
- *      n = global matrix dimension (n x n matrix) 
- *      l = local matrix dimension (l x l matrices)
+ *      n = global matrix dimension (n x n matrix)
  *      f = maximum tolerable faults (f <= sqrt(np)/2)
  *      log = filename of timing output log (OPTIONAL)
  *
  * NOTE: Fault-Tolerance tested on Intel MPI 2021.5
  * Iain Weissburg 2023
  */
-
-// TODO: Add 0-padding around matrix
 
 #include "codedqr_base.h"
 
@@ -280,7 +277,7 @@ int main(int argc, char** argv) {
             B = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
 
             randMatrix(B, glob_rows, nrhs);
-            
+
             /* Limit generated B precision to 5 decimal places */
             for (int i=0; i < glob_rows * nrhs; i++) {
                 B[i] = roundf(B[i] * 1e5);
