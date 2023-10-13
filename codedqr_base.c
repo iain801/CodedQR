@@ -682,30 +682,39 @@ void postOrthogonalize(double* Q, double* Gv_tilde, int p_rank,
 
         double* Q_bar = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
         double* Q_res = mkl_calloc(loc_cols * loc_rows, sizeof(double), 64);
-        
-        /* Perform Q_res = G0 * Q1 */
-        for (i=0; i < m; ++i) {
-            cblas_daxpby(loc_cols * loc_rows, G0[i * n + p_row], Q, 1, 0, Q_bar, 1);
 
-            MPI_Reduce(Q_bar, Q_res, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, reg_col);
-        }
-        
-        /* Transpose Q_res*/
-        if(p_row != p_col) { 
-            /* Distributed transpose */
-            int target_rank = p_col * n + p_row;
-            MPI_Sendrecv_replace(Q_res, loc_cols * loc_rows, MPI_DOUBLE, 
-                target_rank, 0, target_rank, 0, reg_comm, MPI_STATUS_IGNORE);
-        }
-        
-        /* Local transpose */
-        mkl_dimatcopy('R', 'T', loc_rows, loc_cols, 1, Q_res, loc_cols, loc_rows);
+        if (DO_FINAL_SOLVE) {
+            /* Perform Q_res = G0 * Q1 */
+            for (i=0; i < m; ++i) {
+                cblas_daxpby(loc_cols * loc_rows, G0[i * n + p_row], Q, 1, 0, Q_bar, 1);
 
-        /* Q_res * G0 */
-        for (i=0; i < n; ++i) {
-            cblas_daxpby(loc_cols * loc_rows, G0[p_col * n + i], Q_res, 1, 0, Q_bar, 1);
+                MPI_Reduce(Q_bar, Q_res, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, reg_col);
+            }
+        
+            /* Transpose Q_res*/
+            if(p_row != p_col) { 
+                /* Distributed transpose */
+                int target_rank = p_col * n + p_row;
+                MPI_Sendrecv_replace(Q_res, loc_cols * loc_rows, MPI_DOUBLE, 
+                    target_rank, 0, target_rank, 0, reg_comm, MPI_STATUS_IGNORE);
+            }
+            
+            /* Local transpose */
+            mkl_dimatcopy('R', 'T', loc_rows, loc_cols, 1, Q_res, loc_cols, loc_rows);
 
-            MPI_Reduce(Q_bar, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, reg_row);
+            /* Q_res * G0 */
+            for (i=0; i < n; ++i) {
+                cblas_daxpby(loc_cols * loc_rows, G0[p_col * n + i], Q_res, 1, 0, Q_bar, 1);
+
+                MPI_Reduce(Q_bar, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, reg_row);
+            }
+        } else {
+            /* Perform Q = G0 * Q1 */
+            for (i=0; i < m; ++i) {
+                cblas_daxpby(loc_cols * loc_rows, G0[i * n + p_row], Q, 1, 0, Q_bar, 1);
+
+                MPI_Reduce(Q_bar, Q, loc_cols * loc_rows, MPI_DOUBLE, MPI_SUM, i, reg_col);
+            }
         }
 
         mkl_free(Q_bar);

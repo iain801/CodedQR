@@ -278,20 +278,23 @@ int main(int argc, char** argv) {
 
             X = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
             B = mkl_malloc(glob_rows * nrhs * sizeof(double), 64);
-            randMatrix(B, glob_rows, nrhs);
 
+            randMatrix(B, glob_rows, nrhs);
+            
             /* Limit generated B precision to 5 decimal places */
             for (int i=0; i < glob_rows * nrhs; i++) {
                 B[i] = roundf(B[i] * 1e5);
                 B[i] = B[i] * 1e-5;
             }
             
-            t_temp = MPI_Wtime();
+            if (DO_FINAL_SOLVE) {
+                t_temp = MPI_Wtime();
 
-            cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
-            LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
+                cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, glob_rows, nrhs, glob_rows, 1, Q, glob_cols, B, nrhs, 0, X, nrhs);
+                LAPACKE_dtrtrs(LAPACK_ROW_MAJOR, 'U', 'N', 'N', glob_rows, nrhs, R, glob_cols, X, nrhs);
 
-            t_solve = MPI_Wtime() - t_temp;
+                t_solve = MPI_Wtime() - t_temp;
+            }
 
             /* Print all matrices */
             if (glob_cols < 100 && glob_rows < 100) {
