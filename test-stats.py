@@ -1,5 +1,5 @@
-import pandas as pd
 import sys
+import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 
 inpath = sys.argv[1]
@@ -41,8 +41,10 @@ df['tcomp'] = df['pbmgs'] - df['tqr']
 
 df['encode'] = df['cs construct'] / df['tqr']
 df['post'] = df['post-ortho'] / df['tqr']
-df['decode'] = df['recovery'] / df['tqr']
+df['decode'] = df['recovery'] / df['tqr'] / ( df['p'] + df['f'] )
 df['comp'] = df['tcomp'] / df['tqr']
+
+df['overhead'] = df['comp'] + df['encode'] + df['post']
 
 alpha = 5e0
 gamma = 1e-2
@@ -59,7 +61,8 @@ df_means = df.groupby(config_cols)[df.columns[3:]].mean()
 df_std = df.groupby(config_cols)[df.columns[3:]].std()
 
 # Create the bar chart for the current configuration value
-total_time = df_means.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), yerr=df_std, color=['#ef6f6c','#8963ba','#90c290','#51AEF0'])
+total_time = df_means.plot(y='total', kind='bar',
+                           figsize=(10, 8), color=['#ef6f6c','#8963ba','#90c290','#51AEF0'])
 
 # Set the title and axis labels for the plot
 total_time.set_title(f'Total Execution Time')
@@ -70,7 +73,8 @@ total_time.set_ylabel('Time (s)')
 pdf_pages.savefig()
 
 # Create the stacked bar chart for the current configuration value
-overhead = df_means.plot(y=['comp', 'encode', 'post'], kind='bar', stacked=True, figsize=(10, 8), yerr=df_std, color=['#fff7ae','#916c80','#ffc6d9'])
+overhead = df_means.plot(y=['overhead'], kind='bar',
+                         figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
 
 # Set the title and axis labels for the plot
 overhead.set_title(f'Overhead Breakdown')
@@ -82,9 +86,11 @@ pdf_pages.savefig()
 for n_val in df['n'].unique():
     
     n_rows = df_means.query(f"n == {n_val}")
+    # n_rows.drop('n', axis=1, inplace=True)
     
     # Create the bar chart for the current configuration value
-    total_time_n = n_rows.plot(y='total', kind='bar', stacked=False, figsize=(10, 8), color=['#ef6f6c','#8963ba','#90c290','#51AEF0'])
+    total_time_n = n_rows.plot(y='total', kind='bar',
+                               figsize=(10, 8), color=['#ef6f6c','#8963ba','#90c290','#51AEF0'])
 
     # Set the title and axis labels for the plot
     total_time_n.set_title(f'Total Execution Time n = {n_val}')
@@ -95,7 +101,8 @@ for n_val in df['n'].unique():
     pdf_pages.savefig()
 
     # Create the stacked bar chart for the current configuration value
-    overhead_n = n_rows.plot(y=['comp', 'encode', 'post'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
+    overhead_n = n_rows.plot(y=['overhead'], kind='bar',
+                             figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
 
     # Set the title and axis labels for the plot
     overhead_n.set_title(f'Overhead Breakdown n={n_val}, p, f')
@@ -104,19 +111,34 @@ for n_val in df['n'].unique():
 
     # Save the figure to a PDF file
     pdf_pages.savefig()
+    
+    # Create the stacked bar chart for the current configuration value
+    coding_n = n_rows.plot(y=['encode', 'decode', 'post'], kind='bar',
+                           figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
+
+    # Set the title and axis labels for the plot
+    coding_n.set_title(f'Coding Breakdown n={n_val}, p, f')
+    coding_n.set_xlabel(', '.join(config_cols[1:]))
+    coding_n.set_ylabel('Proportion of  Tqr')
+
+    # Save the figure to a PDF file
+    pdf_pages.savefig()
 
 df_means = df.groupby(config_cols[1:])[df.columns[3:]].mean()
 df_std = df.groupby(config_cols[1:])[df.columns[3:]].std()
 
-overhead = df_means.plot(y=['comp', 'encode', 'post'], kind='bar', stacked=True, figsize=(10, 8), yerr=df_std, color=['#fff7ae','#916c80','#ffc6d9'])
+overhead = df_means.plot(y=['overhead'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
 
 # Set the title and axis labels for the plot
 overhead.set_title(f'Overhead Average p, f')
 overhead.set_xlabel(', '.join(config_cols[1:]))
 overhead.set_ylabel('Proportion of  Tqr')
 
+# Save the figure to a PDF file
+pdf_pages.savefig()
+
 # Create the stacked bar chart for the current configuration value
-coding = df_means.plot(y=['encode', 'decode'], kind='bar', stacked=True, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
+coding = df_means.plot(y=['encode', 'decode', 'post'], kind='bar', stacked=False, figsize=(10, 8), color=['#fff7ae','#916c80','#ffc6d9'])
 
 # Set the title and axis labels for the plot
 coding.set_title(f'Encode and Reocvery Breakdown p, f')
