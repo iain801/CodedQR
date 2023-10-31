@@ -1,0 +1,47 @@
+#!/bin/bash -l
+
+#SBATCH --job-name=codedqr-root
+#SBATCH --output=codedqr-%j.out
+
+#SBATCH --ntasks=1
+#SBATCH --partition=short
+
+/bin/hostname
+
+cd $SLURM_SUBMIT_DIR
+
+module purge
+module load mpi/latest
+module load mkl/latest
+module load compiler/latest
+
+module load gnu/5.4.0
+
+which mpirun
+
+make codedqr
+
+DATA_PATH="data/codedqr-data-${SLURM_JOBID}.csv"
+
+echo "p,n,f,recovery,final solve,post-ortho,cs construct,pbmgs" > $DATA_PATH
+
+DUMPS_DIR="dumps/codedqr-$SLURM_JOBID/"
+
+mkdir $DUMPS_DIR
+
+for I in {1..10}
+do
+    for P in {6..12..2}
+    do  
+        for F in {0..3..1}
+        do  
+            JOB_NAME="codedqr_sub_${P}_${F}"
+            DUMP_FILE="${DUMPS_DIR}${JOB_NAME}-${I}.out"
+            sbatch --job-name=$JOB_NAME \
+                --output=$DUMP_FILE \
+                --ntasks=$(( ($P+$F)**2 )) \
+                --export=P=$P,F=$F,DATA_PATH=$DATA_PATH,PATH=$PATH,LD_LIBRARY_PATH=$LD_LIBRARY_PATH \
+                codedqr-sub.job
+        done
+    done
+done

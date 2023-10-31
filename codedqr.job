@@ -1,10 +1,17 @@
 #!/bin/bash -l
-#SBATCH --job-name=codedqr_root
-#SBATCH --partition=short
 
-#SBATCH --ntasks=1
+#SBATCH --job-name=codedqr
+#SBATCH --partition=batch
 
-/bin/hostname
+#SBATCH --mail-type=begin
+#SBATCH --mail-type=end
+#SBATCH --mail-type=fail
+#SBATCH --mail-user=ixw@ucsb.edu
+
+#SBATCH --ntasks=240
+#SBATCH --nodes=6
+#SBATCH --distribution=cyclic:fcyclic:fcyclic,NoPack
+#SBATCH --mem-per-cpu=4G
 
 module purge
 module load mpi/latest
@@ -13,23 +20,33 @@ module load compiler/latest
 
 module load gnu/5.4.0
 
+cd $SLURM_SUBMIT_DIR
+
+/bin/hostname
+
 make codedqr
 
-DATA_PATH="data/codedqr-data-${SLURM_JOBID}.csv"
-# PLOT_PATH="plots/${SLURM_JOB_NAME}-plots-${SLURM_JOBID}.pdf"
+DATA_PATH="data/${SLURM_JOB_NAME}-data-${SLURM_JOBID}.csv"
+PLOT_PATH="plots/${SLURM_JOB_NAME}-plots-${SLURM_JOBID}.pdf"
 
 echo "p,n,f,recovery,final solve,post-ortho,cs construct,pbmgs" > $DATA_PATH
 
+# throwaway to set up mpi
+mpirun -n 225 ./out/codedqr_main 1200 3
+
 for I in {1..5}
 do
-    for P in {6..12..2}
-    do  
-        
-        for F in {0..3..1}
-        do  
-            sbatch --job-name="codedqr_sub_($P)_($F)" --ntasks=$(( ($P+$F)**2 )) \
-                --export=P=$P,F=$F,DATA_PATH=$DATA_PATH codedqr_sub.job
-
+    for N in {12000..36000..12000}
+    do
+        for P in {6..12..2}
+        do
+            for F in {0..3..1}
+            do
+                NP=$(( ($P+$F)**2 ))
+                mpirun -n $NP ./out/codedqr_main $N $F $DATA_PATH
+            done
         done
     done
+    python test-stats.py $DATA_PATH $PLOT_PATH
+
 done
