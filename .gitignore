@@ -63,9 +63,9 @@ val/*
 
 # Output files
 *.out
-log_*.txt
+dumps/*
 out/*
-*.pdf
-*.csv
+plots/*
+# data/*
 codedqr_test.c
 test.job
