@@ -47,6 +47,4 @@ do
             done
         done
     done
-    python test-stats.py $DATA_PATH $PLOT_PATH
-
 done
