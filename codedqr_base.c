@@ -59,7 +59,7 @@ double checkError(double* A, double* Q, double* R, double* E,
     
     double out_norm = 0;    
 
-    double  *Q_bar = mkl_calloc(loc_rows * glob_cols, sizeof(double), 16), 
+    double  *Q_bar = mkl_calloc(loc_rows * glob_cols, sizeof(double), 64), 
             *R_bar = mkl_calloc(loc_cols * glob_rows, sizeof(double), 64);
 
     MPI_Allgather(Q, loc_rows * loc_cols, MPI_DOUBLE, Q_bar, 
@@ -531,7 +531,7 @@ void pbmgs(double* Q, double* R, int p_rank,
 
                 /* Set R to Qnorm in the correct row in the correct node */                    
                 if (p_row == (i + j) / loc_rows) {
-                    if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, (i + j) % loc_rows, k);
+                    if(DEBUG) printf("Process (%d,%d) is setting %.3f at (%d,%d)", p_row, p_col, Qnorm, (i + j) % loc_rows, j);
                     R[((i + j) % loc_rows)*loc_cols + j] = Qnorm;
                 }     
 
@@ -569,7 +569,7 @@ void pbmgs(double* Q, double* R, int p_rank,
             }
 
             /* Copy Q into Qbar for broadcast */
-            LAPACKE_dlacpy(CblasRowMajor, 'A', loc_cols, loc_rows, Q, loc_cols, Qbar, loc_cols);
+            LAPACKE_dlacpy(CblasRowMajor, 'A', loc_rows, loc_cols, Q, loc_cols, Qbar, loc_cols);
         }
 
         if(DEBUG && p_col == APC) {

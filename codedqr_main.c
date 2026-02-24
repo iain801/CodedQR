@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
             *Gv_tilde,          /* Q Factor generator matrix */
             *Gh_tilde;          /* R Factor generator matrix */
 
-    double  t_solve, t_qr,      /* timer */
+    double  t_solve = 0, t_qr,   /* timer */
             t_postortho,        /* timer */
             t_valid, t_temp,    /* timer */
             t_decode, t_encode, /* timer */
@@ -44,6 +44,11 @@ int main(int argc, char** argv) {
     /******************** Initialize MPI *****************************/
 
     MPI_Init(&argc, &argv);
+
+    if (argc < 3) {
+        fprintf(stderr, "Usage: mpirun -n <np> codedqr_main <n> <f> [log_file]\n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
 
     /**************** Shuffle process ranks **************************/
 
@@ -115,10 +120,11 @@ int main(int argc, char** argv) {
             randMatrixR(A, glob_cols, glob_rows, glob_cols + check_cols);
             
             /* Limit generated A precision to 5 decimal places */
-            for (int i=0; i < glob_rows * glob_cols; i++) {
-                A[i] = roundf(A[i] * 1e5);
-                A[i] = A[i] * 1e-5;
-            }
+            for (int r=0; r < glob_rows; r++)
+                for (int c=0; c < glob_cols; c++) {
+                    int idx = r * (glob_cols + check_cols) + c;
+                    A[idx] = roundf(A[idx] * 1e5) * 1e-5;
+                }
             
             // for (int i = 0; i < glob_cols; ++i) {
             //     for (int j = 0; j < glob_rows; j++) {
@@ -342,9 +348,7 @@ int main(int argc, char** argv) {
         fflush(stdout);
 
         if (argc == 4) {
-            char fname[30];
-            sprintf(fname, "%s", argv[3]);
-            FILE *log = fopen(fname,"a");
+            FILE *log = fopen(argv[3], "a");
             fprintf(log, "%d,%d,%d,%.8g,%.8g,%.8g,%.8g,%.8g\n", 
                 proc_rows-max_fails, glob_rows, max_fails, t_decode, t_solve, t_postortho, t_encode, t_qr);
             fclose(log);
@@ -359,6 +363,7 @@ int main(int argc, char** argv) {
     mkl_free(R);
     mkl_free(E);
     
+    vslDeleteStream(&stream);
     mkl_free_buffers();
 
     MPI_Comm_free(&glob_comm);
